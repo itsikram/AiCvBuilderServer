@@ -63,6 +63,25 @@ export const updateUser = asyncHandler(async (req: AuthRequest, res: Response) =
   res.json({ success: true, data: user });
 });
 
+export const updateUserSubscription = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { plan, expiresAt } = req.body;
+  
+  const user = await User.findById(req.params.id);
+  if (!user) throw new ApiError(404, "User not found");
+
+  if (plan) {
+    user.subscription.plan = plan;
+    user.subscription.status = "active";
+  }
+  
+  if (expiresAt) {
+    user.subscription.expiresAt = new Date(expiresAt);
+  }
+
+  await user.save();
+  res.json({ success: true, data: user });
+});
+
 export const deleteUser = asyncHandler(async (req: AuthRequest, res: Response) => {
   await User.findByIdAndDelete(req.params.id);
   res.json({ success: true, message: "User deleted" });

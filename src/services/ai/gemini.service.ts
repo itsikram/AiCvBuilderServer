@@ -132,6 +132,223 @@ class GeminiService {
       skillGaps: string[];
     }>(text);
   }
+
+  async parseResume(resumeText: string) {
+    const prompt = `You are a resume parser. Extract the following information from this resume text and return it as JSON:
+
+Resume text:
+${resumeText}
+
+Return JSON with this exact structure:
+{
+  "personalInfo": {
+    "fullName": "",
+    "email": "",
+    "phone": "",
+    "location": "",
+    "linkedin": "",
+    "portfolio": "",
+    "github": "",
+    "website": "",
+    "summary": ""
+  },
+  "experience": [
+    {
+      "company": "",
+      "position": "",
+      "location": "",
+      "startDate": "",
+      "endDate": "",
+      "current": false,
+      "bullets": [""]
+    }
+  ],
+  "education": [
+    {
+      "institution": "",
+      "degree": "",
+      "field": "",
+      "startDate": "",
+      "endDate": "",
+      "gpa": ""
+    }
+  ],
+  "skills": [""],
+  "languages": [
+    {
+      "name": "",
+      "proficiency": "native" or "fluent" or "intermediate" or "basic"
+    }
+  ],
+  "certifications": [
+    {
+      "name": "",
+      "issuer": "",
+      "date": "",
+      "credentialId": "",
+      "credentialUrl": ""
+    }
+  ],
+  "awards": [
+    {
+      "title": "",
+      "issuer": "",
+      "date": "",
+      "description": ""
+    }
+  ],
+  "publications": [
+    {
+      "title": "",
+      "publisher": "",
+      "date": "",
+      "url": "",
+      "description": ""
+    }
+  ],
+  "volunteerExperience": [
+    {
+      "organization": "",
+      "role": "",
+      "startDate": "",
+      "endDate": "",
+      "current": false,
+      "description": ""
+    }
+  ],
+  "references": [
+    {
+      "name": "",
+      "position": "",
+      "company": "",
+      "email": "",
+      "phone": "",
+      "relationship": ""
+    }
+  ],
+  "interests": [""],
+  "courses": [
+    {
+      "name": "",
+      "provider": "",
+      "date": "",
+      "certificateUrl": ""
+    }
+  ],
+  "memberships": [
+    {
+      "organization": "",
+      "role": "",
+      "startDate": "",
+      "endDate": "",
+      "current": false
+    }
+  ],
+  "projects": [
+    {
+      "name": "",
+      "description": "",
+      "url": "",
+      "technologies": [""]
+    }
+  ]
+}
+
+If a field is not found in the resume, return an empty string or empty array. Do not make up information. For dates, use YYYY-MM format if possible, otherwise keep the original format.`;
+
+    const text = await this.generateWithRetry(prompt);
+    return parseJsonResponse<{
+      personalInfo: {
+        fullName: string;
+        email: string;
+        phone: string;
+        location: string;
+        linkedin: string;
+        portfolio: string;
+        github: string;
+        website: string;
+        summary: string;
+      };
+      experience: Array<{
+        company: string;
+        position: string;
+        location: string;
+        startDate: string;
+        endDate: string;
+        current: boolean;
+        bullets: string[];
+      }>;
+      education: Array<{
+        institution: string;
+        degree: string;
+        field: string;
+        startDate: string;
+        endDate: string;
+        gpa: string;
+      }>;
+      skills: string[];
+      languages: Array<{
+        name: string;
+        proficiency: "native" | "fluent" | "intermediate" | "basic";
+      }>;
+      certifications: Array<{
+        name: string;
+        issuer: string;
+        date: string;
+        credentialId: string;
+        credentialUrl: string;
+      }>;
+      awards: Array<{
+        title: string;
+        issuer: string;
+        date: string;
+        description: string;
+      }>;
+      publications: Array<{
+        title: string;
+        publisher: string;
+        date: string;
+        url: string;
+        description: string;
+      }>;
+      volunteerExperience: Array<{
+        organization: string;
+        role: string;
+        startDate: string;
+        endDate: string;
+        current: boolean;
+        description: string;
+      }>;
+      references: Array<{
+        name: string;
+        position: string;
+        company: string;
+        email: string;
+        phone: string;
+        relationship: string;
+      }>;
+      interests: string[];
+      courses: Array<{
+        name: string;
+        provider: string;
+        date: string;
+        certificateUrl: string;
+      }>;
+      memberships: Array<{
+        organization: string;
+        role: string;
+        startDate: string;
+        endDate: string;
+        current: boolean;
+      }>;
+      projects: Array<{
+        name: string;
+        description: string;
+        url: string;
+        technologies: string[];
+      }>;
+    }>(text);
+  }
 }
 
 export const geminiService = new GeminiService();

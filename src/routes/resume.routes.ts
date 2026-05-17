@@ -10,6 +10,9 @@ import {
   atsCheckSchema,
 } from "../validators/resume.validator.js";
 import { aiLimiter } from "../middleware/rateLimit.middleware.js";
+import multer from "multer";
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 const router = Router();
 
@@ -23,8 +26,10 @@ router.post("/", validate(createResumeSchema), resumeController.createResume);
 router.post("/ai/generate", aiLimiter, validate(generateResumeSchema), resumeController.generateWithAI);
 router.post("/ai/improve", aiLimiter, validate(improveResumeSchema), resumeController.improveWithAI);
 router.post("/ai/ats-check", aiLimiter, validate(atsCheckSchema), resumeController.checkATS);
+router.post("/upload-parse", upload.single("file"), resumeController.uploadAndParseResume);
 
 router.get("/:id", resumeController.getResume);
+router.patch("/:id/template", resumeController.updateTemplate);
 router.patch("/:id", validate(updateResumeSchema), resumeController.updateResume);
 router.delete("/:id", resumeController.deleteResume);
 router.post("/:id/duplicate", resumeController.duplicateResume);

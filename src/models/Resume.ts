@@ -29,6 +29,75 @@ export interface IProject {
   technologies: string[];
 }
 
+export interface ILanguage {
+  id: string;
+  name: string;
+  proficiency: "native" | "fluent" | "intermediate" | "basic";
+}
+
+export interface ICertification {
+  id: string;
+  name: string;
+  issuer: string;
+  date: string;
+  credentialId?: string;
+  credentialUrl?: string;
+}
+
+export interface IAward {
+  id: string;
+  title: string;
+  issuer: string;
+  date: string;
+  description?: string;
+}
+
+export interface IPublication {
+  id: string;
+  title: string;
+  publisher: string;
+  date: string;
+  url?: string;
+  description?: string;
+}
+
+export interface IVolunteerExperience {
+  id: string;
+  organization: string;
+  role: string;
+  startDate: string;
+  endDate?: string;
+  current: boolean;
+  description: string;
+}
+
+export interface IReference {
+  id: string;
+  name: string;
+  position: string;
+  company: string;
+  email?: string;
+  phone?: string;
+  relationship: string;
+}
+
+export interface ICourse {
+  id: string;
+  name: string;
+  provider: string;
+  date: string;
+  certificateUrl?: string;
+}
+
+export interface IMembership {
+  id: string;
+  organization: string;
+  role?: string;
+  startDate: string;
+  endDate?: string;
+  current: boolean;
+}
+
 export interface IResumeContent {
   personalInfo: {
     fullName: string;
@@ -37,14 +106,23 @@ export interface IResumeContent {
     location: string;
     linkedin?: string;
     portfolio?: string;
+    github?: string;
+    website?: string;
     summary: string;
   };
   experience: IExperience[];
   education: IEducation[];
   projects: IProject[];
   skills: string[];
-  languages: string[];
-  certifications: string[];
+  languages: ILanguage[];
+  certifications: ICertification[];
+  awards: IAward[];
+  publications: IPublication[];
+  volunteerExperience: IVolunteerExperience[];
+  references: IReference[];
+  interests: string[];
+  courses: ICourse[];
+  memberships: IMembership[];
   customSections: { title: string; content: string }[];
 }
 
@@ -87,6 +165,8 @@ const resumeSchema = new Schema<IResume>(
         location: { type: String, default: "" },
         linkedin: String,
         portfolio: String,
+        github: String,
+        website: String,
         summary: { type: String, default: "" },
       },
       experience: [
@@ -122,8 +202,84 @@ const resumeSchema = new Schema<IResume>(
         },
       ],
       skills: [String],
-      languages: [String],
-      certifications: [String],
+      languages: [
+        {
+          id: String,
+          name: String,
+          proficiency: { type: String, enum: ["native", "fluent", "intermediate", "basic"] },
+        },
+      ],
+      certifications: [
+        {
+          id: String,
+          name: String,
+          issuer: String,
+          date: String,
+          credentialId: String,
+          credentialUrl: String,
+        },
+      ],
+      awards: [
+        {
+          id: String,
+          title: String,
+          issuer: String,
+          date: String,
+          description: String,
+        },
+      ],
+      publications: [
+        {
+          id: String,
+          title: String,
+          publisher: String,
+          date: String,
+          url: String,
+          description: String,
+        },
+      ],
+      volunteerExperience: [
+        {
+          id: String,
+          organization: String,
+          role: String,
+          startDate: String,
+          endDate: String,
+          current: Boolean,
+          description: String,
+        },
+      ],
+      references: [
+        {
+          id: String,
+          name: String,
+          position: String,
+          company: String,
+          email: String,
+          phone: String,
+          relationship: String,
+        },
+      ],
+      interests: [String],
+      courses: [
+        {
+          id: String,
+          name: String,
+          provider: String,
+          date: String,
+          certificateUrl: String,
+        },
+      ],
+      memberships: [
+        {
+          id: String,
+          organization: String,
+          role: String,
+          startDate: String,
+          endDate: String,
+          current: Boolean,
+        },
+      ],
       customSections: [{ title: String, content: String }],
     },
     atsScore: Number,

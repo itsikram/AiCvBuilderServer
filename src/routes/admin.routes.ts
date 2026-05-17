@@ -8,6 +8,7 @@ router.use(authenticate, requireAdmin);
 router.get("/dashboard", adminController.getDashboard);
 router.get("/users", adminController.getUsers);
 router.patch("/users/:id", adminController.updateUser);
+router.patch("/users/:id/subscription", adminController.updateUserSubscription);
 router.delete("/users/:id", adminController.deleteUser);
 router.get("/payments", adminController.getPayments);
 router.get("/coupons", adminController.getCoupons);

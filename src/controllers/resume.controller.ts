@@ -17,6 +17,7 @@ import { User } from "../models/User.js";
 import { generateResumePDF } from "../services/pdf.service.js";
 import { trackEvent } from "../services/analytics.service.js";
 import { cacheGet, cacheSet } from "../config/redis.js";
+import * as pdfParse from "pdf-parse";
 
 export const getResumes = asyncHandler(async (req: AuthRequest, res: Response) => {
   const resumes = await Resume.find({ userId: req.user!.userId })
@@ -58,8 +59,18 @@ export const createResume = asyncHandler(async (req: AuthRequest, res: Response)
       education: [],
       projects: [],
       skills: [],
-      languages: [],
+      languages: [
+        { id: uuidv4(), name: "Bangla", proficiency: "native" },
+        { id: uuidv4(), name: "English", proficiency: "fluent" },
+      ],
       certifications: [],
+      awards: [],
+      publications: [],
+      volunteerExperience: [],
+      references: [],
+      interests: [],
+      courses: [],
+      memberships: [],
       customSections: [],
     },
   });
@@ -76,6 +87,20 @@ export const updateResume = asyncHandler(async (req: AuthRequest, res: Response)
     { _id: req.params.id, userId: req.user!.userId },
     { $set: req.body },
     { new: true, runValidators: true }
+  );
+  if (!resume) throw new ApiError(404, "Resume not found");
+  res.json({ success: true, data: resume });
+});
+
+export const updateTemplate = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { templateId } = req.body;
+  if (!templateId) {
+    throw new ApiError(400, "templateId is required");
+  }
+  const resume = await Resume.findOneAndUpdate(
+    { _id: req.params.id, userId: req.user!.userId },
+    { $set: { templateId } },
+    { new: true }
   );
   if (!resume) throw new ApiError(404, "Resume not found");
   res.json({ success: true, data: resume });
@@ -267,4 +292,25 @@ export const addExperience = asyncHandler(async (req: AuthRequest, res: Response
   resume.content.experience.push({ id: uuidv4(), ...req.body, bullets: req.body.bullets || [] });
   await resume.save();
   res.json({ success: true, data: resume });
+});
+
+export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: Response) => {
+  if (!req.file) {
+    throw new ApiError(400, "No file uploaded");
+  }
+
+  const buffer = req.file.buffer;
+  const data = await (pdfParse as any).default(buffer);
+  const text = data.text;
+
+  // Use AI to parse the resume text into structured format
+  const user = await User.findById(req.user!.userId);
+  if (!user) throw new ApiError(404, "User not found");
+
+  const parsedContent = await geminiService.parseResume(text);
+
+  res.json({
+    success: true,
+    data: parsedContent,
+  });
 });
