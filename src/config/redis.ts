@@ -1,12 +1,15 @@
-import IORedis from "ioredis";
+import { Redis as RedisClient } from "ioredis";
 import { config } from "./index.js";
 
-let redis: IORedis | null = null;
+let redis: RedisClient | null = null;
 
-export const getRedis = (): IORedis | null => {
+export const getRedis = (): RedisClient | null => {
+  if (process.env.DISABLE_REDIS === "true") {
+    return null;
+  }
   if (!redis) {
     try {
-      redis = new IORedis(config.redis.url, {
+      redis = new RedisClient(config.redis.url, {
         maxRetriesPerRequest: 3,
         lazyConnect: true,
       });

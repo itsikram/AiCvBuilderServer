@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from "mongoose";
+import bcrypt from "bcryptjs";
 
 export type UserRole = "user" | "admin";
 export type SubscriptionPlan = "free" | "premium";
@@ -78,14 +79,12 @@ const userSchema = new Schema<IUser>(
 
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password") || !this.password) return next();
-  const bcrypt = await import("bcryptjs");
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
 userSchema.methods.comparePassword = async function (candidate: string): Promise<boolean> {
   if (!this.password) return false;
-  const bcrypt = await import("bcryptjs");
   return bcrypt.compare(candidate, this.password);
 };
 
