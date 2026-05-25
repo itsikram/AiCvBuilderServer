@@ -28,6 +28,10 @@ router.patch("/users/:id", adminController.updateUser);
 router.patch("/users/:id/subscription", adminController.updateUserSubscription);
 router.delete("/users/:id", adminController.deleteUser);
 router.get("/payments", adminController.getPayments);
+router.get("/bkash/config", adminController.getBkashConfig);
+router.put("/bkash/config", adminController.updateBkashConfig);
+router.get("/bkash/payments", adminController.getBkashPayments);
+router.patch("/bkash/payments/:id", adminController.reviewBkashPayment);
 router.get("/coupons", adminController.getCoupons);
 router.post("/coupons", adminController.createCoupon);
 router.patch("/coupons/:id", adminController.updateCoupon);
@@ -38,5 +42,12 @@ router.get("/blogs", adminController.manageBlogs);
 router.post("/blogs", uploadBlogCover, adminController.createBlog);
 router.patch("/blogs/:id", uploadBlogCover, adminController.updateBlog);
 router.get("/gemini-keys", adminController.getGeminiKeyStatus);
+
+// Page Content Management (CMS)
+router.get("/page-content", adminController.getAllPageContents);
+router.get("/page-content/:pageId", adminController.getPageContent);
+router.post("/page-content", adminController.createPageContent);
+router.patch("/page-content/:id", adminController.updatePageContent);
+router.delete("/page-content/:id", adminController.deletePageContent);
 
 export default router;

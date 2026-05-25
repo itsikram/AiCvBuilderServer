@@ -5,6 +5,8 @@ import { Payment } from "../models/Payment.js";
 import { Coupon } from "../models/Coupon.js";
 import { Template } from "../models/Template.js";
 import { Blog } from "../models/Blog.js";
+import { PageContent } from "../models/PageContent.js";
+import { BkashConfig } from "../models/BkashConfig.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
@@ -12,6 +14,9 @@ import { getDashboardStats } from "../services/analytics.service.js";
 import { geminiKeyManager } from "../services/ai/gemini-key-manager.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
 import { normalizeLanguage } from "../utils/language.js";
+import { activatePremium } from "../services/subscription.service.js";
+import { Analytics } from "../models/Analytics.js";
+import { User } from "../models/User.js";
 
 const parseBlogTags = (value: unknown): string[] => {
   if (Array.isArray(value)) {
@@ -197,6 +202,93 @@ export const getPayments = asyncHandler(async (req: AuthRequest, res: Response) 
   res.json({ success: true, data: { payments, total, page } });
 });
 
+export const getBkashConfig = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const config = await BkashConfig.findOne({ isActive: true }).sort({ updatedAt: -1 });
+  res.json({ success: true, data: config });
+});
+
+export const updateBkashConfig = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { number, instructions } = req.body as { number?: string; instructions?: string };
+
+  if (!number || !String(number).trim()) {
+    throw new ApiError(400, "BKash number is required");
+  }
+
+  await BkashConfig.updateMany({ isActive: true }, { $set: { isActive: false } });
+
+  const config = await BkashConfig.create({
+    number: String(number).trim(),
+    instructions: instructions ? String(instructions).trim() : "",
+    updatedBy: req.user!.userId,
+    isActive: true,
+  });
+
+  res.json({ success: true, data: config });
+});
+
+export const getBkashPayments = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const status = typeof req.query.status === "string" ? req.query.status : "all";
+  const filter = status === "all" ? { provider: "bkash" } : { provider: "bkash", status };
+  const payments = await Payment.find(filter)
+    .populate("userId", "name email")
+    .sort({ createdAt: -1 });
+
+  res.json({ success: true, data: { payments } });
+});
+
+export const reviewBkashPayment = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { status, reviewNotes } = req.body as {
+    status?: "completed" | "failed";
+    reviewNotes?: string;
+  };
+
+  if (!status || !["completed", "failed"].includes(status)) {
+    throw new ApiError(400, "Status must be completed or failed");
+  }
+
+  const payment = await Payment.findById(req.params.id);
+  if (!payment) throw new ApiError(404, "Payment not found");
+
+  payment.status = status;
+  payment.providerData = {
+    ...(payment.providerData || {}),
+    reviewNotes: reviewNotes || "",
+    reviewedBy: req.user!.userId,
+    reviewedAt: new Date().toISOString(),
+  };
+
+  await payment.save();
+
+  if (status === "completed") {
+    const user = await User.findById(payment.userId);
+    if (user) {
+      await activatePremium(user, payment.billingCycle);
+    }
+
+    if (payment.couponCode) {
+      await Coupon.findOneAndUpdate(
+        { code: payment.couponCode },
+        { $inc: { usedCount: 1 } }
+      );
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    await Analytics.findOneAndUpdate(
+      { date: today },
+      {
+        $inc: {
+          "metrics.revenue": payment.amount,
+          "metrics.premiumConversions": 1,
+        },
+      },
+      { upsert: true }
+    );
+  }
+
+  res.json({ success: true, data: payment });
+});
+
 export const createCoupon = asyncHandler(async (req: AuthRequest, res: Response) => {
   const coupon = await Coupon.create(req.body);
   res.status(201).json({ success: true, data: coupon });
@@ -258,5 +350,97 @@ export const getGeminiKeyStatus = asyncHandler(async (_req: AuthRequest, res: Re
         masked: `key_${idx}_${stat.isLimited ? "limited" : "active"}`,
       })),
     },
+  });
+});
+
+// Page Content Management (CMS)
+export const getPageContent = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { pageId, language = "en" } = req.query;
+
+  const filter: Record<string, unknown> = { isActive: true };
+  if (pageId) filter.pageId = pageId;
+  if (language) filter.language = language;
+
+  const contents = await PageContent.find(filter).sort({ pageId: 1, language: 1 });
+
+  res.json({
+    success: true,
+    data: contents,
+  });
+});
+
+export const createPageContent = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { pageId, language = "en", content } = req.body;
+
+  if (!pageId || !content) {
+    throw new ApiError(400, "Page ID and content are required");
+  }
+
+  // Check if content already exists for this page and language
+  const existing = await PageContent.findOne({ pageId, language });
+
+  let pageContent;
+  if (existing) {
+    // Update existing
+    existing.content = content;
+    existing.isActive = true;
+    await existing.save();
+    pageContent = existing;
+  } else {
+    // Create new
+    pageContent = await PageContent.create({
+      pageId,
+      language,
+      content,
+      isActive: true,
+    });
+  }
+
+  res.status(201).json({
+    success: true,
+    data: pageContent,
+  });
+});
+
+export const updatePageContent = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { content, isActive } = req.body;
+
+  const pageContent = await PageContent.findById(id);
+  if (!pageContent) {
+    throw new ApiError(404, "Page content not found");
+  }
+
+  if (content !== undefined) pageContent.content = content;
+  if (isActive !== undefined) pageContent.isActive = isActive;
+
+  await pageContent.save();
+
+  res.json({
+    success: true,
+    data: pageContent,
+  });
+});
+
+export const deletePageContent = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+
+  const pageContent = await PageContent.findByIdAndDelete(id);
+  if (!pageContent) {
+    throw new ApiError(404, "Page content not found");
+  }
+
+  res.json({
+    success: true,
+    message: "Page content deleted",
+  });
+});
+
+export const getAllPageContents = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const contents = await PageContent.find().sort({ pageId: 1, language: 1 });
+
+  res.json({
+    success: true,
+    data: contents,
   });
 });
