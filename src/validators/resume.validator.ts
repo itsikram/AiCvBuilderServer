@@ -46,4 +46,5 @@ export const improveResumeSchema = z.object({
 export const atsCheckSchema = z.object({
   resumeText: z.string().min(50),
   jobDescription: z.string().optional(),
+  language: z.enum(["en", "bn"]).optional(),
 });

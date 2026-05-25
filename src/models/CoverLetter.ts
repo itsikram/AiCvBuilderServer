@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from "mongoose";
+import { normalizeLanguage } from "../utils/language.js";
 
 export interface ICoverLetter extends Document {
   userId: mongoose.Types.ObjectId;
@@ -24,5 +25,10 @@ const coverLetterSchema = new Schema<ICoverLetter>(
   },
   { timestamps: true }
 );
+
+coverLetterSchema.pre("validate", function (next) {
+  this.language = normalizeLanguage(this.language);
+  next();
+});
 
 export const CoverLetter = mongoose.model<ICoverLetter>("CoverLetter", coverLetterSchema);

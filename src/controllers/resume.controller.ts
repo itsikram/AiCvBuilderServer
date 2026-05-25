@@ -6,6 +6,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 import { generateUniqueSlug } from "../utils/slug.js";
+import { normalizeLanguage } from "../utils/language.js";
 import { geminiService } from "../services/ai/gemini.service.js";
 import {
   checkResumeLimit,
@@ -217,13 +218,14 @@ export const createResume = asyncHandler(async (req: AuthRequest, res: Response)
 
   const { title, templateId, format, language } = req.body;
   const template = await resolveTemplateForUser(templateId || "modern-ats", user);
+  const resolvedLanguage = normalizeLanguage(language || user.language);
   const resume = await Resume.create({
     userId: user._id,
     title,
     slug: generateUniqueSlug(title),
     templateId: template.slug,
     format: format || "ats",
-    language: language || user.language,
+    language: resolvedLanguage,
     theme: template.defaultTheme || {},
     content: {
       personalInfo: {
@@ -301,7 +303,11 @@ export const generateWithAI = asyncHandler(async (req: AuthRequest, res: Respons
   if (!user) throw new ApiError(404, "User not found");
   await checkAiLimit(user);
 
-  const result = await geminiService.generateResume(req.body);
+  const language = normalizeLanguage(req.body.language || user.language);
+  const result = await geminiService.generateResume({
+    ...req.body,
+    language,
+  });
   await incrementAiUsage(user);
   await trackEvent("aiRequests");
 
@@ -339,10 +345,11 @@ export const tailorResumeWithAI = asyncHandler(async (req: AuthRequest, res: Res
   }
 
   const currentResumeText = baseContent || JSON.stringify(resume?.content ?? {});
+  const language = normalizeLanguage(req.body.language || user.language);
   const result = await geminiService.tailorResume(
     currentResumeText,
     req.body.jobDescription,
-    req.body.language || "en"
+    language
   );
 
   if (resume) {
@@ -375,10 +382,11 @@ export const improveWithAI = asyncHandler(async (req: AuthRequest, res: Response
   await checkFeatureAccess(user, "aiOptimization");
   await checkAiLimit(user);
 
+  const language = normalizeLanguage(req.body.language || user.language);
   const result = await geminiService.improveResume(
     req.body.resumeText,
     req.body.jobDescription,
-    req.body.language
+    language
   );
   await incrementAiUsage(user);
   await trackEvent("aiRequests");
@@ -399,6 +407,7 @@ export const checkATS = asyncHandler(async (req: AuthRequest, res: Response) => 
   await checkFeatureAccess(user, "atsChecker");
   await checkAiLimit(user);
 
+  const language = normalizeLanguage(req.body.language || user.language);
   const cacheKey = `ats:${Buffer.from(req.body.resumeText).toString("base64").slice(0, 50)}`;
   const cached = await cacheGet<unknown>(cacheKey);
   if (cached) {
@@ -408,7 +417,8 @@ export const checkATS = asyncHandler(async (req: AuthRequest, res: Response) => 
 
   const result = await geminiService.checkATS(
     req.body.resumeText,
-    req.body.jobDescription
+    req.body.jobDescription,
+    language
   );
   await cacheSet(cacheKey, result, 1800);
   await incrementAiUsage(user);
@@ -428,6 +438,7 @@ export const exportPDF = asyncHandler(async (req: AuthRequest, res: Response) =>
     watermark: limits.watermarkPdf,
     format: resume.format,
     templateId: resume.templateId,
+    theme: resume.theme,
   });
 
   resume.lastExportedAt = new Date();
@@ -498,7 +509,7 @@ export const duplicateResume = asyncHandler(async (req: AuthRequest, res: Respon
     templateId: original.templateId,
     format: original.format,
     content: original.content,
-    language: original.language,
+    language: normalizeLanguage(original.language),
     theme: original.theme,
     sectionOrder: original.sectionOrder,
   });
@@ -575,7 +586,7 @@ export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: R
       slug: generateUniqueSlug(titleFromFile || "Uploaded Resume"),
       templateId: "modern-ats",
       format: "ats",
-      language: user.language || "en",
+      language: normalizeLanguage(user.language || "en"),
       content: parsedContent,
       uploadedResumeText: resumeText,
       uploadedFileName: req.file.originalname,

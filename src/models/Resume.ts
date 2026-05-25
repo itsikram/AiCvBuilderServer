@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from "mongoose";
+import { normalizeLanguage } from "../utils/language.js";
 
 export interface IExperience {
   id: string;
@@ -320,5 +321,10 @@ const resumeSchema = new Schema<IResume>(
 
 resumeSchema.index({ userId: 1, createdAt: -1 });
 resumeSchema.index({ publicSlug: 1 });
+
+resumeSchema.pre("validate", function (next) {
+  this.language = normalizeLanguage(this.language);
+  next();
+});
 
 export const Resume = mongoose.model<IResume>("Resume", resumeSchema);

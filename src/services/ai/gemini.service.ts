@@ -129,8 +129,8 @@ class GeminiService {
     }>(text);
   }
 
-  async checkATS(resumeContent: string, jobDescription?: string) {
-    const text = await this.generateWithRetry(PROMPTS.atsCheck(resumeContent, jobDescription));
+  async checkATS(resumeContent: string, jobDescription?: string, language: "en" | "bn" = "en") {
+    const text = await this.generateWithRetry(PROMPTS.atsCheck(resumeContent, jobDescription, language));
     return parseJsonResponse<{
       score: number;
       grade: string;

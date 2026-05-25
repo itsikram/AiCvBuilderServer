@@ -115,7 +115,9 @@ Respond ONLY with valid JSON:
   "fullLetter": "string"
 }`,
 
-  atsCheck: (resumeContent: string, jobDescription?: string) => `Analyze this resume for ATS compatibility${jobDescription ? " against this job description" : ""}.
+  atsCheck: (resumeContent: string, jobDescription?: string, language: "en" | "bn" = "en") => `Analyze this resume for ATS compatibility${jobDescription ? " against this job description" : ""}.
+
+Language: ${language === "bn" ? "Bangla" : "English"}
 
 RESUME:
 ${resumeContent}
