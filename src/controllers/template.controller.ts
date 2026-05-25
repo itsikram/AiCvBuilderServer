@@ -11,8 +11,9 @@ export const getTemplates = asyncHandler(async (req: AuthRequest, res: Response)
   const filter: Record<string, unknown> = { isActive: true };
   if (category) filter.category = category;
 
-  const templates = await Template.find(filter).sort({ sortOrder: 1 });
-  let data = templates.map((t) => t.toObject());
+  const templates = await Template.find(filter).sort({ sortOrder: 1 }).lean();
+  let data: Array<Record<string, unknown> & { isPremium?: boolean; locked?: boolean }> =
+    templates.map((t) => ({ ...t }));
 
   if (req.user) {
     const user = await User.findById(req.user.userId);

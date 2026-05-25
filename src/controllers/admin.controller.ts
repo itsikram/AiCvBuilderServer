@@ -9,6 +9,93 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 import { getDashboardStats } from "../services/analytics.service.js";
+import { geminiKeyManager } from "../services/ai/gemini-key-manager.js";
+import { uploadBuffer } from "../services/cloudinary.service.js";
+
+const parseBlogTags = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map(String).map((tag) => tag.trim()).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const getOptionalString = (value: unknown): string | undefined => {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+};
+
+const getBoolean = (value: unknown): boolean => value === true || value === "true";
+
+const uploadBlogCoverImage = async (file?: Express.Multer.File) => {
+  if (!file) return undefined;
+
+  const uploaded = await uploadBuffer(file.buffer, "chakricv/blogs", "image", {
+    resource_type: "image",
+    use_filename: true,
+    unique_filename: true,
+    filename_override: file.originalname,
+  });
+
+  if (!uploaded) {
+    throw new ApiError(500, "Cloudinary is not configured");
+  }
+
+  return uploaded.url;
+};
+
+const buildBlogPayload = async (req: AuthRequest) => {
+  const payload: Record<string, unknown> = {};
+
+  const title = getOptionalString(req.body.title);
+  if (title) payload.title = title;
+
+  const slug = getOptionalString(req.body.slug);
+  if (slug) payload.slug = slug;
+
+  const excerpt = getOptionalString(req.body.excerpt);
+  if (excerpt) payload.excerpt = excerpt;
+
+  const content = getOptionalString(req.body.content);
+  if (content) payload.content = content;
+
+  const coverImage = await uploadBlogCoverImage(req.file);
+  const fallbackCoverImage = getOptionalString(req.body.coverImage);
+  if (coverImage || fallbackCoverImage) {
+    payload.coverImage = coverImage || fallbackCoverImage;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(req.body, "tags")) {
+    payload.tags = parseBlogTags(req.body.tags);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(req.body, "language")) {
+    const language = req.body.language;
+    payload.language = language === "bn" ? "bn" : "en";
+  }
+
+  if (Object.prototype.hasOwnProperty.call(req.body, "isPublished")) {
+    payload.isPublished = getBoolean(req.body.isPublished);
+  }
+
+  if (payload.isPublished === true && !Object.prototype.hasOwnProperty.call(req.body, "publishedAt")) {
+    payload.publishedAt = new Date().toISOString();
+  }
+
+  const metaTitle = getOptionalString(req.body.metaTitle);
+  if (metaTitle) payload.metaTitle = metaTitle;
+
+  const metaDescription = getOptionalString(req.body.metaDescription);
+  if (metaDescription) payload.metaDescription = metaDescription;
+
+  return payload;
+};
 
 export const getDashboard = asyncHandler(async (_req: AuthRequest, res: Response) => {
   const [stats, totalUsers, totalResumes, totalRevenue, recentUsers] = await Promise.all([
@@ -137,11 +224,30 @@ export const manageBlogs = asyncHandler(async (req: AuthRequest, res: Response) 
 });
 
 export const createBlog = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const blog = await Blog.create({ ...req.body, author: req.user!.userId });
+  const payload = await buildBlogPayload(req);
+  const blog = await Blog.create({ ...payload, author: req.user!.userId });
   res.status(201).json({ success: true, data: blog });
 });
 
 export const updateBlog = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const blog = await Blog.findByIdAndUpdate(req.params.id, req.body, { new: true });
+  const payload = await buildBlogPayload(req);
+  const blog = await Blog.findByIdAndUpdate(req.params.id, payload, { new: true });
   res.json({ success: true, data: blog });
+});
+
+export const getGeminiKeyStatus = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const keyStats = geminiKeyManager.getKeyStats();
+  const availableKeys = geminiKeyManager.getAvailableKeyCount();
+
+  res.json({
+    success: true,
+    data: {
+      totalKeys: keyStats.length,
+      availableKeys,
+      keys: keyStats.map((stat, idx) => ({
+        ...stat,
+        masked: `key_${idx}_${stat.isLimited ? "limited" : "active"}`,
+      })),
+    },
+  });
 });

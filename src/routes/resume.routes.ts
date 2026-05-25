@@ -6,13 +6,26 @@ import {
   createResumeSchema,
   updateResumeSchema,
   generateResumeSchema,
+  tailorResumeSchema,
   improveResumeSchema,
   atsCheckSchema,
 } from "../validators/resume.validator.js";
 import { aiLimiter } from "../middleware/rateLimit.middleware.js";
 import multer from "multer";
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+  },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype !== "application/pdf") {
+      cb(new Error("Only PDF resume uploads are supported"));
+      return;
+    }
+    cb(null, true);
+  },
+});
 
 const router = Router();
 
@@ -24,11 +37,13 @@ router.get("/", resumeController.getResumes);
 router.post("/", validate(createResumeSchema), resumeController.createResume);
 
 router.post("/ai/generate", aiLimiter, validate(generateResumeSchema), resumeController.generateWithAI);
+router.post("/ai/tailor", aiLimiter, validate(tailorResumeSchema), resumeController.tailorResumeWithAI);
 router.post("/ai/improve", aiLimiter, validate(improveResumeSchema), resumeController.improveWithAI);
 router.post("/ai/ats-check", aiLimiter, validate(atsCheckSchema), resumeController.checkATS);
 router.post("/upload-parse", upload.single("file"), resumeController.uploadAndParseResume);
 
 router.get("/:id", resumeController.getResume);
+router.get("/:id/uploaded-file", resumeController.downloadUploadedResume);
 router.patch("/:id/template", resumeController.updateTemplate);
 router.patch("/:id", validate(updateResumeSchema), resumeController.updateResume);
 router.delete("/:id", resumeController.deleteResume);

@@ -109,6 +109,9 @@ export interface IResumeContent {
     github?: string;
     website?: string;
     summary: string;
+    profilePhoto?: string;
+    profilePhotoSize?: "small" | "medium" | "large";
+    profilePhotoAlignment?: "left" | "center" | "right";
   };
   experience: IExperience[];
   education: IEducation[];
@@ -142,6 +145,13 @@ export interface IResume extends Document {
   sectionOrder: string[];
   lastExportedAt?: Date;
   viewCount: number;
+  uploadedResumeText?: string;
+  uploadedFileName?: string;
+  uploadedFilePath?: string;
+  uploadedFileUrl?: string;
+  uploadedFileMimeType?: string;
+  uploadedFileSize?: number;
+  uploadedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -168,6 +178,9 @@ const resumeSchema = new Schema<IResume>(
         github: String,
         website: String,
         summary: { type: String, default: "" },
+        profilePhoto: String,
+        profilePhotoSize: { type: String, enum: ["small", "medium", "large"], default: "medium" },
+        profilePhotoAlignment: { type: String, enum: ["left", "center", "right"], default: "center" },
       },
       experience: [
         {
@@ -294,6 +307,13 @@ const resumeSchema = new Schema<IResume>(
     },
     lastExportedAt: Date,
     viewCount: { type: Number, default: 0 },
+    uploadedResumeText: { type: String, default: null },
+    uploadedFileName: { type: String, default: null },
+    uploadedFilePath: { type: String, default: null },
+    uploadedFileUrl: { type: String, default: null },
+    uploadedFileMimeType: { type: String, default: null },
+    uploadedFileSize: { type: Number, default: null },
+    uploadedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

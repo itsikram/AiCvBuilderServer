@@ -34,6 +34,30 @@ Respond ONLY with valid JSON in this exact structure:
   "careerTips": ["string"]
 }`,
 
+  tailorResume: (resume: string, jobDescription: string, language: "en" | "bn") => `You are an ATS-focused resume strategist. Tailor the candidate's current resume for the given job description without changing the candidate's identity or hiding prior achievements.
+
+Language: ${language === "bn" ? "Bangla" : "English"}
+
+CURRENT RESUME:
+${resume}
+
+JOB DESCRIPTION:
+${jobDescription}
+
+Tasks:
+1. Rewrite the summary to explicitly match the role and employer needs.
+2. Prioritize and tailor the skills section to the job.
+3. Rewrite the first 4 experience bullet lists so they highlight the most relevant achievements for this role.
+4. Suggest the top 5 keywords or themes to emphasize.
+
+Respond ONLY with valid JSON:
+{
+  "summary": "string",
+  "skills": ["string"],
+  "experienceBullets": [{"company": "string", "position": "string", "bullets": ["string"]}],
+  "suggestions": ["string"]
+}`,
+
   improveResume: (resume: string, jobDescription: string, language: "en" | "bn") => `You are an ATS optimization expert. Analyze and improve this resume for the given job description.
 
 Language: ${language === "bn" ? "Bangla" : "English"}

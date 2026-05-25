@@ -15,7 +15,9 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GEMINI_API_KEY: z.string().optional().default(""),
+  GEMINI_API_KEYS: z.string().optional().default(""),
   GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
+  PDFTXT_API_KEY: z.string().optional().default(""),
   REDIS_URL: z.string().default("redis://localhost:6379"),
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),
@@ -65,7 +67,14 @@ export const config = {
   },
   gemini: {
     apiKey: process.env.GEMINI_API_KEY || "",
+    apiKeys: (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "")
+      .split(",")
+      .map(key => key.trim())
+      .filter(key => key.length > 0),
     model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  },
+  pdftxt: {
+    apiKey: process.env.PDFTXT_API_KEY || "",
   },
   redis: {
     url: process.env.REDIS_URL || "redis://localhost:6379",

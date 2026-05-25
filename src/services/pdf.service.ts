@@ -3,7 +3,7 @@ import { IResumeContent } from "../models/Resume.js";
 
 export const generateResumePDF = (
   content: IResumeContent,
-  options: { watermark?: boolean; format?: string } = {}
+  options: { watermark?: boolean; format?: string; templateId?: string } = {}
 ): Promise<Buffer> => {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 50, size: "A4" });

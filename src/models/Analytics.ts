@@ -6,6 +6,7 @@ export interface IAnalytics extends Document {
     newUsers: number;
     activeUsers: number;
     resumesCreated: number;
+    resumesUploaded: number;
     aiRequests: number;
     pdfExports: number;
     revenue: number;
@@ -20,6 +21,7 @@ const analyticsSchema = new Schema<IAnalytics>(
       newUsers: { type: Number, default: 0 },
       activeUsers: { type: Number, default: 0 },
       resumesCreated: { type: Number, default: 0 },
+      resumesUploaded: { type: Number, default: 0 },
       aiRequests: { type: Number, default: 0 },
       pdfExports: { type: Number, default: 0 },
       revenue: { type: Number, default: 0 },

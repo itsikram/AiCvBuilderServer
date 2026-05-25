@@ -2,9 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../../config/index.js";
 import { PROMPTS } from "./prompts.js";
 import { ApiError } from "../../utils/ApiError.js";
-
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1000;
+import { geminiKeyManager } from "./gemini-key-manager.js";
 
 const parseJsonResponse = <T>(text: string): T => {
   const cleaned = text
@@ -23,37 +21,51 @@ const parseJsonResponse = <T>(text: string): T => {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 class GeminiService {
-  private client: GoogleGenerativeAI | null = null;
-
-  private getClient(): GoogleGenerativeAI {
-    if (!this.client) {
-      if (!config.gemini.apiKey) {
-        throw new ApiError(503, "AI service is not configured");
-      }
-      this.client = new GoogleGenerativeAI(config.gemini.apiKey);
-    }
-    return this.client;
-  }
-
   private async generateWithRetry(prompt: string): Promise<string> {
-    const model = this.getClient().getGenerativeModel({ model: config.gemini.model });
+    const maxKeyAttempts = geminiKeyManager.getAvailableKeyCount() || 1;
     let lastError: Error | null = null;
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
-        if (!text) throw new Error("Empty AI response");
-        return text;
-      } catch (error) {
-        lastError = error as Error;
-        if (attempt < MAX_RETRIES) {
-          await sleep(RETRY_DELAY_MS * attempt);
+    for (let keyAttempt = 0; keyAttempt < maxKeyAttempts; keyAttempt++) {
+      const { client, keyIndex } = await geminiKeyManager.getNextClient();
+      const model = client.getGenerativeModel({ model: config.gemini.model });
+      let lastKeyError: Error | null = null;
+
+      // Retry with same key up to 3 times
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const result = await model.generateContent(prompt);
+          const text = result.response.text();
+          if (!text) throw new Error("Empty AI response");
+          return text;
+        } catch (error) {
+          lastKeyError = error as Error;
+          lastError = lastKeyError;
+
+          // Check if it's a rate limit error
+          const errorStr = String(lastKeyError).toLowerCase();
+          if (
+            errorStr.includes("resource_exhausted") ||
+            errorStr.includes("rate_limit") ||
+            errorStr.includes("quota") ||
+            errorStr.includes("429")
+          ) {
+            // Mark this key as limited and try next key
+            await geminiKeyManager.handleError(keyIndex, lastKeyError);
+            break; // Exit retry loop, try next key
+          }
+
+          // For other errors, retry with delay
+          if (attempt < 3) {
+            await sleep(1000 * attempt);
+          }
         }
       }
     }
 
-    throw new ApiError(502, `AI generation failed: ${lastError?.message || "Unknown error"}`);
+    throw new ApiError(
+      502,
+      `AI generation failed after trying all available API keys: ${lastError?.message || "Unknown error"}`
+    );
   }
 
   async generateResume(input: {
@@ -72,6 +84,16 @@ class GeminiService {
       skills: string[];
       suggestedKeywords: string[];
       careerTips: string[];
+    }>(text);
+  }
+
+  async tailorResume(resume: string, jobDescription: string, language: "en" | "bn") {
+    const text = await this.generateWithRetry(PROMPTS.tailorResume(resume, jobDescription, language));
+    return parseJsonResponse<{
+      summary: string;
+      skills: string[];
+      experienceBullets: { company: string; position: string; bullets: string[] }[];
+      suggestions: string[];
     }>(text);
   }
 
@@ -251,10 +273,16 @@ Return JSON with this exact structure:
       "url": "",
       "technologies": [""]
     }
+  ],
+  "customSections": [
+    {
+      "title": "",
+      "content": ""
+    }
   ]
 }
 
-If a field is not found in the resume, return an empty string or empty array. Do not make up information. For dates, use YYYY-MM format if possible, otherwise keep the original format.`;
+If a field is not found in the resume, return an empty string or empty array. Do not include placeholder objects with empty values in arrays. Do not make up information. For dates, use YYYY-MM format if possible, otherwise keep the original format.`;
 
     const text = await this.generateWithRetry(prompt);
     return parseJsonResponse<{
@@ -346,6 +374,10 @@ If a field is not found in the resume, return an empty string or empty array. Do
         description: string;
         url: string;
         technologies: string[];
+      }>;
+      customSections: Array<{
+        title: string;
+        content: string;
       }>;
     }>(text);
   }

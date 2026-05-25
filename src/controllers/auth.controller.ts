@@ -9,6 +9,7 @@ import { generateAccessToken, generateRefreshToken } from "../utils/tokens.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 import { sendVerificationEmail, sendPasswordResetEmail } from "../services/email.service.js";
 import { trackEvent } from "../services/analytics.service.js";
+import { uploadBuffer } from "../services/cloudinary.service.js";
 
 const googleClient = config.google.clientId
   ? new OAuth2Client(config.google.clientId)
@@ -40,6 +41,7 @@ const sendTokens = (res: Response, user: InstanceType<typeof User>) => {
         role: user.role,
         language: user.language,
         theme: user.theme,
+        avatar: user.avatar,
         isEmailVerified: user.isEmailVerified,
         subscription: user.subscription,
         referralCode: user.referralCode,
@@ -47,6 +49,20 @@ const sendTokens = (res: Response, user: InstanceType<typeof User>) => {
       accessToken,
     },
   });
+};
+
+const uploadProfilePicture = async (file?: Express.Multer.File) => {
+  if (!file) return undefined;
+
+  const uploaded = await uploadBuffer(file.buffer, "chakricv/profile-pictures", "image", {
+    transformation: [{ width: 800, height: 800, crop: "limit" }],
+  });
+
+  if (!uploaded) {
+    throw new ApiError(500, "Profile picture upload failed");
+  }
+
+  return uploaded.url;
 };
 
 export const register = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -57,6 +73,7 @@ export const register = asyncHandler(async (req: AuthRequest, res: Response) => 
 
   const verificationToken = crypto.randomBytes(32).toString("hex");
   const userReferralCode = `CV${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+  const avatar = await uploadProfilePicture(req.file);
 
   let referredBy;
   if (referralCode) {
@@ -72,6 +89,7 @@ export const register = asyncHandler(async (req: AuthRequest, res: Response) => 
     name,
     email,
     password,
+    avatar,
     language: language || "en",
     referralCode: userReferralCode,
     referredBy,
@@ -226,10 +244,18 @@ export const resetPassword = asyncHandler(async (req: AuthRequest, res: Response
 
 export const updateProfile = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { name, language, theme } = req.body;
+  const avatar = await uploadProfilePicture(req.file);
+
   const user = await User.findByIdAndUpdate(
     req.user!.userId,
-    { ...(name && { name }), ...(language && { language }), ...(theme && { theme }) },
+    {
+      ...(name && { name }),
+      ...(language && { language }),
+      ...(theme && { theme }),
+      ...(avatar ? { avatar } : {}),
+    },
     { new: true }
   );
+
   res.json({ success: true, data: user });
 });

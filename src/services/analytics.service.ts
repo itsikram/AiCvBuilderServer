@@ -22,6 +22,7 @@ const defaultMetrics = {
   newUsers: 0,
   activeUsers: 0,
   resumesCreated: 0,
+  resumesUploaded: 0,
   aiRequests: 0,
   pdfExports: 0,
   revenue: 0,

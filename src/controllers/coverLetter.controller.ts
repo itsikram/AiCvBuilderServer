@@ -14,6 +14,42 @@ import {
 import { generateCoverLetterPDF } from "../services/pdf.service.js";
 import { trackEvent } from "../services/analytics.service.js";
 
+const buildResumeSummary = (resume: any) => {
+  const content = resume?.content ?? {};
+  const personalInfo = content.personalInfo ?? {};
+  const experience = Array.isArray(content.experience) ? content.experience : [];
+  const education = Array.isArray(content.education) ? content.education : [];
+  const skills = Array.isArray(content.skills) ? content.skills : [];
+
+  const experienceLines = experience.slice(0, 4).map((item: any) => {
+    const company = item?.company ? ` at ${item.company}` : "";
+    const role = item?.position ? `${item.position}` : "";
+    const dates = item?.startDate ? `${item.startDate}${item?.endDate ? ` - ${item.endDate}` : ""}` : "";
+    const bullets = Array.isArray(item?.bullets) ? item.bullets.filter(Boolean).join(" ") : "";
+    return [role, company, dates, bullets].filter(Boolean).join(" | ");
+  });
+
+  const educationLines = education.slice(0, 3).map((item: any) => {
+    const degree = item?.degree ? `${item.degree}` : "";
+    const institution = item?.institution ? ` at ${item.institution}` : "";
+    const dates = item?.startDate ? `${item.startDate}${item?.endDate ? ` - ${item.endDate}` : ""}` : "";
+    return [degree, institution, dates].filter(Boolean).join(" | ");
+  });
+
+  return [
+    `Name: ${personalInfo.fullName || ""}`,
+    `Email: ${personalInfo.email || ""}`,
+    `Phone: ${personalInfo.phone || ""}`,
+    `Location: ${personalInfo.location || ""}`,
+    `Summary: ${personalInfo.summary || ""}`,
+    `Skills: ${skills.join(", ")}`,
+    `Experience: ${experienceLines.join("\n")}`,
+    `Education: ${educationLines.join("\n")}`,
+  ]
+    .filter((line) => line && !line.endsWith(": "))
+    .join("\n");
+};
+
 export const getCoverLetters = asyncHandler(async (req: AuthRequest, res: Response) => {
   const letters = await CoverLetter.find({ userId: req.user!.userId }).sort({ updatedAt: -1 });
   res.json({ success: true, data: letters });
@@ -28,7 +64,7 @@ export const generateCoverLetter = asyncHandler(async (req: AuthRequest, res: Re
   let resumeSummary = "";
   if (req.body.resumeId) {
     const resume = await Resume.findOne({ _id: req.body.resumeId, userId: user._id });
-    resumeSummary = resume?.content.personalInfo.summary || "";
+    resumeSummary = buildResumeSummary(resume);
   }
 
   const result = await geminiService.generateCoverLetter({

@@ -29,6 +29,13 @@ export const generateResumeSchema = z.object({
   resumeId: z.string().optional(),
 });
 
+export const tailorResumeSchema = z.object({
+  resumeId: z.string().optional(),
+  jobDescription: z.string().min(20),
+  language: z.enum(["en", "bn"]).optional().default("en"),
+  content: z.record(z.unknown()).optional(),
+});
+
 export const improveResumeSchema = z.object({
   resumeText: z.string().min(50),
   jobDescription: z.string().min(20),

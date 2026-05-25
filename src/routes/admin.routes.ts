@@ -1,6 +1,23 @@
 import { Router } from "express";
+import multer from "multer";
 import * as adminController from "../controllers/admin.controller.js";
 import { authenticate, requireAdmin } from "../middleware/auth.middleware.js";
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+  },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      cb(new Error("Only image files are supported for blog cover uploads"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+const uploadBlogCover = upload.single("coverImage");
 
 const router = Router();
 router.use(authenticate, requireAdmin);
@@ -18,7 +35,8 @@ router.get("/templates", adminController.manageTemplates);
 router.post("/templates", adminController.manageTemplates);
 router.patch("/templates/:id", adminController.updateTemplate);
 router.get("/blogs", adminController.manageBlogs);
-router.post("/blogs", adminController.createBlog);
-router.patch("/blogs/:id", adminController.updateBlog);
+router.post("/blogs", uploadBlogCover, adminController.createBlog);
+router.patch("/blogs/:id", uploadBlogCover, adminController.updateBlog);
+router.get("/gemini-keys", adminController.getGeminiKeyStatus);
 
 export default router;
