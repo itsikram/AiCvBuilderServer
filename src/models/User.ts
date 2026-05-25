@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema } from "mongoose";
 import bcrypt from "bcryptjs";
+import { normalizeLanguage } from "../utils/language.js";
 
 export type UserRole = "user" | "admin";
 export type SubscriptionPlan = "free" | "premium";
@@ -78,6 +79,8 @@ const userSchema = new Schema<IUser>(
 );
 
 userSchema.pre("save", async function (next) {
+  this.language = normalizeLanguage(this.language);
+
   if (!this.isModified("password") || !this.password) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();

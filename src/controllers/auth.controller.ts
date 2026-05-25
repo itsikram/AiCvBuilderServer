@@ -10,6 +10,7 @@ import { AuthRequest } from "../middleware/auth.middleware.js";
 import { sendVerificationEmail, sendPasswordResetEmail } from "../services/email.service.js";
 import { trackEvent } from "../services/analytics.service.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
+import { normalizeLanguage } from "../utils/language.js";
 
 const googleClient = config.google.clientId
   ? new OAuth2Client(config.google.clientId)
@@ -243,18 +244,19 @@ export const resetPassword = asyncHandler(async (req: AuthRequest, res: Response
 });
 
 export const updateProfile = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { name, language, theme } = req.body;
+  const { name, theme } = req.body;
+  const language = typeof req.body.language !== "undefined" ? normalizeLanguage(req.body.language) : undefined;
   const avatar = await uploadProfilePicture(req.file);
 
   const user = await User.findByIdAndUpdate(
     req.user!.userId,
     {
       ...(name && { name }),
-      ...(language && { language }),
+      ...(language !== undefined && { language }),
       ...(theme && { theme }),
       ...(avatar ? { avatar } : {}),
     },
-    { new: true }
+    { new: true, runValidators: true }
   );
 
   res.json({ success: true, data: user });

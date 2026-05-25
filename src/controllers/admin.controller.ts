@@ -11,6 +11,7 @@ import { AuthRequest } from "../middleware/auth.middleware.js";
 import { getDashboardStats } from "../services/analytics.service.js";
 import { geminiKeyManager } from "../services/ai/gemini-key-manager.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
+import { normalizeLanguage } from "../utils/language.js";
 
 const parseBlogTags = (value: unknown): string[] => {
   if (Array.isArray(value)) {
@@ -143,9 +144,17 @@ export const getUsers = asyncHandler(async (req: AuthRequest, res: Response) => 
 });
 
 export const updateUser = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true }).select(
-    "-password"
-  );
+  const updateData = { ...req.body };
+
+  if (typeof updateData.language !== "undefined") {
+    updateData.language = normalizeLanguage(updateData.language);
+  }
+
+  const user = await User.findByIdAndUpdate(req.params.id, updateData, {
+    new: true,
+    runValidators: true,
+  }).select("-password");
+
   if (!user) throw new ApiError(404, "User not found");
   res.json({ success: true, data: user });
 });
