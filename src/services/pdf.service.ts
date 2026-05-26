@@ -313,10 +313,19 @@ const getTemplateStyle = (templateId: string | undefined, theme?: Record<string,
   };
 };
 
-const drawSectionTitle = (doc: InstanceType<typeof PDFDocument>, title: string, color: string) => {
+const drawSectionTitle = (doc: InstanceType<typeof PDFDocument>, title: string, color: string, pageWidth: number) => {
+  const y = doc.y;
+  
+  // Draw accent line above title
   doc.fillColor(color);
-  doc.fontSize(12).font("Helvetica-Bold").text(title);
-  doc.moveDown(0.2);
+  doc.rect(50, y - 2, pageWidth, 2).fill();
+  
+  // Draw title
+  doc.fillColor(color);
+  doc.fontSize(12).font("Helvetica-Bold").text(title, 50, y + 5, { width: pageWidth });
+  
+  // Move down past the title
+  doc.y = y + 25;
 };
 
 const drawDateRange = (startDate: string, endDate: string | undefined, current: boolean) => {
@@ -435,236 +444,302 @@ const drawHeader = async (doc: InstanceType<typeof PDFDocument>, content: IResum
   }
 };
 
-const renderSummary = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderSummary = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.personalInfo.summary) {
     return;
   }
 
-  drawSectionTitle(doc, "PROFESSIONAL SUMMARY", style.accentColor);
+  drawSectionTitle(doc, "PROFESSIONAL SUMMARY", style.accentColor, pageWidth);
   doc.fillColor(style.textColor);
-  doc.fontSize(10).font("Helvetica").text(content.personalInfo.summary, { width: 500 });
-  doc.moveDown(0.5);
+  doc.fontSize(10).font("Helvetica").text(content.personalInfo.summary, 50, doc.y, { width: pageWidth, lineGap: 2 });
+  doc.moveDown(1);
 };
 
-const renderExperience = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderExperience = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.experience.length) {
     return;
   }
 
-  drawSectionTitle(doc, "EXPERIENCE", style.accentColor);
-  content.experience.forEach((exp) => {
+  drawSectionTitle(doc, "EXPERIENCE", style.accentColor, pageWidth);
+  content.experience.forEach((exp, idx) => {
+    // Job header with position and company on one line, date on the right
     doc.fillColor(style.headingColor);
-    doc.fontSize(11).font("Helvetica-Bold").text(`${exp.position} — ${exp.company}`);
+    doc.fontSize(11).font("Helvetica-Bold").text(exp.position, 50, doc.y, { width: pageWidth * 0.6 });
+    
+    // Company name below position
     doc.fillColor(style.textColor);
-    doc.fontSize(9).font("Helvetica").text(drawDateRange(exp.startDate, exp.endDate, exp.current));
+    doc.fontSize(10).font("Helvetica").text(exp.company, 50, doc.y);
+    
+    // Date range on the right
+    doc.fillColor(style.textColor);
+    doc.fontSize(9).font("Helvetica").text(drawDateRange(exp.startDate, exp.endDate, exp.current), 
+      50 + pageWidth * 0.6, doc.y - 15, { width: pageWidth * 0.4, align: 'right' });
+    
     if (exp.location) {
-      doc.text(exp.location);
+      doc.fontSize(9).font("Helvetica").text(exp.location, 50, doc.y);
     }
+    
+    // Bullet points
+    doc.moveDown(0.3);
     exp.bullets.filter(Boolean).forEach((bullet) => {
-      doc.fontSize(10).text(`• ${bullet}`, { indent: 15 });
+      doc.fontSize(10).font("Helvetica").text(`• ${bullet}`, 50, doc.y, { width: pageWidth, lineGap: 1 });
+      doc.moveDown(0.1);
     });
-    doc.moveDown(0.4);
+    
+    // Add separator between experiences (except last)
+    if (idx < content.experience.length - 1) {
+      doc.moveDown(0.3);
+      doc.fillColor('#e5e7eb');
+      doc.rect(50, doc.y, pageWidth, 1).fill();
+      doc.moveDown(0.5);
+    }
   });
+  doc.moveDown(0.5);
 };
 
-const renderEducation = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderEducation = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.education.length) {
     return;
   }
 
-  drawSectionTitle(doc, "EDUCATION", style.accentColor);
+  drawSectionTitle(doc, "EDUCATION", style.accentColor, pageWidth);
   content.education.forEach((edu) => {
     doc.fillColor(style.headingColor);
-    doc.fontSize(11).font("Helvetica-Bold").text(`${edu.degree}${edu.field ? ` in ${edu.field}` : ""}`);
+    doc.fontSize(11).font("Helvetica-Bold").text(`${edu.degree}${edu.field ? ` in ${edu.field}` : ""}`, 50, doc.y, { width: pageWidth * 0.6 });
+    
+    // Date on the right
     doc.fillColor(style.textColor);
-    doc.fontSize(9).font("Helvetica").text(`${edu.institution} | ${edu.startDate} - ${edu.endDate || ""}`);
-    if (edu.gpa) {
-      doc.text(`GPA: ${edu.gpa}`);
-    }
-    doc.moveDown(0.3);
+    doc.fontSize(9).font("Helvetica").text(`${edu.startDate} - ${edu.endDate || ""}`, 
+      50 + pageWidth * 0.6, doc.y - 12, { width: pageWidth * 0.4, align: 'right' });
+    
+    doc.fillColor(style.textColor);
+    doc.fontSize(10).font("Helvetica").text(`${edu.institution}${edu.gpa ? ` | GPA: ${edu.gpa}` : ""}`, 50, doc.y);
+    doc.moveDown(0.5);
   });
 };
 
-const renderSkills = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderSkills = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.skills.length) {
     return;
   }
 
-  drawSectionTitle(doc, "SKILLS", style.accentColor);
+  drawSectionTitle(doc, "SKILLS", style.accentColor, pageWidth);
   doc.fillColor(style.textColor);
-  doc.fontSize(10).font("Helvetica").text(formatList(content.skills));
-  doc.moveDown(0.5);
+  
+  // Render skills as individual items with better formatting
+  const skills = content.skills.filter(Boolean);
+  let x = 50;
+  let y = doc.y;
+  const maxWidth = pageWidth;
+  
+  doc.fontSize(10).font("Helvetica");
+  skills.forEach((skill, idx) => {
+    const text = idx === 0 ? skill.trim() : `• ${skill.trim()}`;
+    const textWidth = doc.widthOfString(text);
+    
+    if (x + textWidth > 50 + maxWidth) {
+      x = 50;
+      y += 15;
+    }
+    
+    doc.fillColor(idx === 0 ? style.textColor : style.accentColor);
+    doc.text(text, x, y, { width: maxWidth, continued: false });
+    x += textWidth + 5;
+  });
+  
+  doc.y = y + 20;
 };
 
-const renderProjects = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderProjects = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.projects.length) {
     return;
   }
 
-  drawSectionTitle(doc, "PROJECTS", style.accentColor);
+  drawSectionTitle(doc, "PROJECTS", style.accentColor, pageWidth);
   content.projects.forEach((project) => {
     doc.fillColor(style.headingColor);
-    doc.fontSize(11).font("Helvetica-Bold").text(project.name);
+    doc.fontSize(11).font("Helvetica-Bold").text(project.name, 50, doc.y, { width: pageWidth });
+    
     doc.fillColor(style.textColor);
-    doc.fontSize(10).font("Helvetica").text(project.description);
+    doc.fontSize(10).font("Helvetica").text(project.description, 50, doc.y, { width: pageWidth, lineGap: 1 });
+    
     if (project.technologies.length) {
-      doc.text(`Technologies: ${project.technologies.join(", ")}`);
+      doc.fontSize(9).font("Helvetica").text(`Technologies: ${project.technologies.join(", ")}`, 50, doc.y, { width: pageWidth });
     }
-    doc.moveDown(0.3);
+    doc.moveDown(0.5);
   });
 };
 
-const renderLanguages = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderLanguages = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.languages.length) {
     return;
   }
 
-  drawSectionTitle(doc, "LANGUAGES", style.accentColor);
+  drawSectionTitle(doc, "LANGUAGES", style.accentColor, pageWidth);
   doc.fillColor(style.textColor);
   doc.fontSize(10).font("Helvetica").text(
-    content.languages.map((lang) => `${lang.name} (${lang.proficiency})`).join(" • ")
+    content.languages.map((lang) => `${lang.name} (${lang.proficiency})`).join("  •  "), 50, doc.y, { width: pageWidth }
   );
-  doc.moveDown(0.5);
+  doc.moveDown(1);
 };
 
-const renderCertifications = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderCertifications = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.certifications.length) {
     return;
   }
 
-  drawSectionTitle(doc, "CERTIFICATIONS", style.accentColor);
+  drawSectionTitle(doc, "CERTIFICATIONS", style.accentColor, pageWidth);
   content.certifications.forEach((cert) => {
     doc.fillColor(style.headingColor);
-    doc.fontSize(11).font("Helvetica-Bold").text(cert.name);
+    doc.fontSize(11).font("Helvetica-Bold").text(cert.name, 50, doc.y, { width: pageWidth * 0.6 });
+    
     doc.fillColor(style.textColor);
-    doc.fontSize(9).font("Helvetica").text(`${cert.issuer} | ${cert.date}`);
-    doc.moveDown(0.3);
+    doc.fontSize(9).font("Helvetica").text(`${cert.issuer} | ${cert.date}`, 
+      50 + pageWidth * 0.6, doc.y - 12, { width: pageWidth * 0.4, align: 'right' });
+    doc.moveDown(0.5);
   });
 };
 
-const renderAwards = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderAwards = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.awards.length) {
     return;
   }
 
-  drawSectionTitle(doc, "AWARDS", style.accentColor);
+  drawSectionTitle(doc, "AWARDS", style.accentColor, pageWidth);
   content.awards.forEach((award) => {
     doc.fillColor(style.headingColor);
-    doc.fontSize(11).font("Helvetica-Bold").text(award.title);
+    doc.fontSize(11).font("Helvetica-Bold").text(award.title, 50, doc.y, { width: pageWidth * 0.6 });
+    
     doc.fillColor(style.textColor);
-    doc.fontSize(9).font("Helvetica").text(`${award.issuer} | ${award.date}`);
+    doc.fontSize(9).font("Helvetica").text(`${award.issuer} | ${award.date}`, 
+      50 + pageWidth * 0.6, doc.y - 12, { width: pageWidth * 0.4, align: 'right' });
+    
     if (award.description) {
-      doc.text(award.description);
+      doc.fillColor(style.textColor);
+      doc.fontSize(10).font("Helvetica").text(award.description, 50, doc.y, { width: pageWidth });
     }
-    doc.moveDown(0.3);
+    doc.moveDown(0.5);
   });
 };
 
-const renderPublications = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderPublications = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.publications.length) {
     return;
   }
 
-  drawSectionTitle(doc, "PUBLICATIONS", style.accentColor);
+  drawSectionTitle(doc, "PUBLICATIONS", style.accentColor, pageWidth);
   content.publications.forEach((publication) => {
     doc.fillColor(style.headingColor);
-    doc.fontSize(11).font("Helvetica-Bold").text(publication.title);
+    doc.fontSize(11).font("Helvetica-Bold").text(publication.title, 50, doc.y, { width: pageWidth * 0.6 });
+    
     doc.fillColor(style.textColor);
-    doc.fontSize(9).font("Helvetica").text(`${publication.publisher} | ${publication.date}`);
+    doc.fontSize(9).font("Helvetica").text(`${publication.publisher} | ${publication.date}`, 
+      50 + pageWidth * 0.6, doc.y - 12, { width: pageWidth * 0.4, align: 'right' });
+    
     if (publication.description) {
-      doc.text(publication.description);
+      doc.fillColor(style.textColor);
+      doc.fontSize(10).font("Helvetica").text(publication.description, 50, doc.y, { width: pageWidth });
     }
-    doc.moveDown(0.3);
+    doc.moveDown(0.5);
   });
 };
 
-const renderVolunteer = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderVolunteer = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.volunteerExperience.length) {
     return;
   }
 
-  drawSectionTitle(doc, "VOLUNTEER EXPERIENCE", style.accentColor);
+  drawSectionTitle(doc, "VOLUNTEER EXPERIENCE", style.accentColor, pageWidth);
   content.volunteerExperience.forEach((volunteer) => {
     doc.fillColor(style.headingColor);
-    doc.fontSize(11).font("Helvetica-Bold").text(volunteer.role);
+    doc.fontSize(11).font("Helvetica-Bold").text(volunteer.role, 50, doc.y, { width: pageWidth * 0.6 });
+    
     doc.fillColor(style.textColor);
-    doc.fontSize(9).font("Helvetica").text(`${volunteer.organization} | ${drawDateRange(volunteer.startDate, volunteer.endDate, volunteer.current)}`);
+    doc.fontSize(9).font("Helvetica").text(`${volunteer.organization} | ${drawDateRange(volunteer.startDate, volunteer.endDate, volunteer.current)}`, 
+      50 + pageWidth * 0.6, doc.y - 12, { width: pageWidth * 0.4, align: 'right' });
+    
     if (volunteer.description) {
-      doc.text(volunteer.description);
+      doc.fillColor(style.textColor);
+      doc.fontSize(10).font("Helvetica").text(volunteer.description, 50, doc.y, { width: pageWidth });
     }
-    doc.moveDown(0.3);
+    doc.moveDown(0.5);
   });
 };
 
-const renderReferences = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderReferences = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.references.length) {
     return;
   }
 
-  drawSectionTitle(doc, "REFERENCES", style.accentColor);
+  drawSectionTitle(doc, "REFERENCES", style.accentColor, pageWidth);
   content.references.forEach((reference) => {
     doc.fillColor(style.headingColor);
-    doc.fontSize(11).font("Helvetica-Bold").text(reference.name);
+    doc.fontSize(11).font("Helvetica-Bold").text(reference.name, 50, doc.y, { width: pageWidth });
+    
     doc.fillColor(style.textColor);
-    doc.fontSize(9).font("Helvetica").text(`${reference.position} at ${reference.company}`);
+    doc.fontSize(10).font("Helvetica").text(`${reference.position} at ${reference.company}`, 50, doc.y);
+    
     if (reference.email || reference.phone) {
-      doc.text([reference.email, reference.phone].filter(Boolean).join(" | "));
+      doc.fontSize(9).font("Helvetica").text([reference.email, reference.phone].filter(Boolean).join(" | "), 50, doc.y);
     }
-    doc.moveDown(0.3);
+    doc.moveDown(0.5);
   });
 };
 
-const renderInterests = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderInterests = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.interests.length) {
     return;
   }
 
-  drawSectionTitle(doc, "INTERESTS", style.accentColor);
+  drawSectionTitle(doc, "INTERESTS", style.accentColor, pageWidth);
   doc.fillColor(style.textColor);
-  doc.fontSize(10).font("Helvetica").text(formatList(content.interests));
-  doc.moveDown(0.5);
+  doc.fontSize(10).font("Helvetica").text(formatList(content.interests), 50, doc.y, { width: pageWidth });
+  doc.moveDown(1);
 };
 
-const renderCourses = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderCourses = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.courses.length) {
     return;
   }
 
-  drawSectionTitle(doc, "COURSES", style.accentColor);
+  drawSectionTitle(doc, "COURSES", style.accentColor, pageWidth);
   content.courses.forEach((course) => {
     doc.fillColor(style.headingColor);
-    doc.fontSize(11).font("Helvetica-Bold").text(course.name);
+    doc.fontSize(11).font("Helvetica-Bold").text(course.name, 50, doc.y, { width: pageWidth * 0.6 });
+    
     doc.fillColor(style.textColor);
-    doc.fontSize(9).font("Helvetica").text(`${course.provider} | ${course.date}`);
-    doc.moveDown(0.3);
+    doc.fontSize(9).font("Helvetica").text(`${course.provider} | ${course.date}`, 
+      50 + pageWidth * 0.6, doc.y - 12, { width: pageWidth * 0.4, align: 'right' });
+    doc.moveDown(0.5);
   });
 };
 
-const renderMemberships = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderMemberships = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.memberships.length) {
     return;
   }
 
-  drawSectionTitle(doc, "MEMBERSHIPS", style.accentColor);
+  drawSectionTitle(doc, "MEMBERSHIPS", style.accentColor, pageWidth);
   content.memberships.forEach((membership) => {
     doc.fillColor(style.headingColor);
-    doc.fontSize(11).font("Helvetica-Bold").text(membership.organization);
+    doc.fontSize(11).font("Helvetica-Bold").text(membership.organization, 50, doc.y, { width: pageWidth });
+    
     doc.fillColor(style.textColor);
-    doc.fontSize(9).font("Helvetica").text(`${membership.role || "Member"}${membership.startDate ? ` | ${membership.startDate}` : ""}${membership.current ? " - Present" : membership.endDate ? ` - ${membership.endDate}` : ""}`);
-    doc.moveDown(0.3);
+    doc.fontSize(9).font("Helvetica").text(`${membership.role || "Member"}${membership.startDate ? ` | ${membership.startDate}` : ""}${membership.current ? " - Present" : membership.endDate ? ` - ${membership.endDate}` : ""}`, 50, doc.y);
+    doc.moveDown(0.5);
   });
 };
 
-const renderCustomSections = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const renderCustomSections = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle, pageWidth: number) => {
   if (!content.customSections.length) {
     return;
   }
 
   content.customSections.forEach((section) => {
-    drawSectionTitle(doc, section.title.toUpperCase(), style.accentColor);
+    drawSectionTitle(doc, section.title.toUpperCase(), style.accentColor, pageWidth);
     doc.fillColor(style.textColor);
-    doc.fontSize(10).font("Helvetica").text(section.content, { width: 500 });
-    doc.moveDown(0.5);
+    doc.fontSize(10).font("Helvetica").text(section.content, 50, doc.y, { width: pageWidth, lineGap: 1 });
+    doc.moveDown(1);
   });
 };
 
@@ -690,31 +765,31 @@ export const generateResumePDF = async (
     await drawHeader(doc, content, style);
 
     if (style.layout === "sidebar") {
-      renderSkills(doc, content, style);
-      renderLanguages(doc, content, style);
-      renderCertifications(doc, content, style);
+      renderSkills(doc, content, style, pageWidth);
+      renderLanguages(doc, content, style, pageWidth);
+      renderCertifications(doc, content, style, pageWidth);
       doc.moveDown(0.5);
     }
 
-    renderSummary(doc, content, style);
-    renderExperience(doc, content, style);
-    renderEducation(doc, content, style);
-    renderProjects(doc, content, style);
+    renderSummary(doc, content, style, pageWidth);
+    renderExperience(doc, content, style, pageWidth);
+    renderEducation(doc, content, style, pageWidth);
+    renderProjects(doc, content, style, pageWidth);
 
     if (style.layout !== "sidebar") {
-      renderSkills(doc, content, style);
-      renderLanguages(doc, content, style);
-      renderCertifications(doc, content, style);
+      renderSkills(doc, content, style, pageWidth);
+      renderLanguages(doc, content, style, pageWidth);
+      renderCertifications(doc, content, style, pageWidth);
     }
 
-    renderAwards(doc, content, style);
-    renderPublications(doc, content, style);
-    renderVolunteer(doc, content, style);
-    renderReferences(doc, content, style);
-    renderInterests(doc, content, style);
-    renderCourses(doc, content, style);
-    renderMemberships(doc, content, style);
-    renderCustomSections(doc, content, style);
+    renderAwards(doc, content, style, pageWidth);
+    renderPublications(doc, content, style, pageWidth);
+    renderVolunteer(doc, content, style, pageWidth);
+    renderReferences(doc, content, style, pageWidth);
+    renderInterests(doc, content, style, pageWidth);
+    renderCourses(doc, content, style, pageWidth);
+    renderMemberships(doc, content, style, pageWidth);
+    renderCustomSections(doc, content, style, pageWidth);
 
     if (options.watermark) {
       doc.save();

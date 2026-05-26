@@ -55,4 +55,10 @@ router.get("/settings", adminController.getAdminSettings);
 router.put("/settings", adminController.updateAdminSetting);
 router.delete("/settings/:key", adminController.deleteAdminSetting);
 
+// Subscription Plan Management
+router.get("/plans", adminController.getSubscriptionPlans);
+router.post("/plans", adminController.createSubscriptionPlan);
+router.patch("/plans/:id", adminController.updateSubscriptionPlan);
+router.delete("/plans/:id", adminController.deleteSubscriptionPlan);
+
 export default router;

@@ -14,7 +14,7 @@ const PageContentSchema = new Schema<IPageContent>(
     pageId: {
       type: String,
       required: true,
-      enum: ["home", "about", "contact"],
+      enum: ["home", "about", "contact", "pricing"],
     },
     language: {
       type: String,

@@ -17,6 +17,7 @@ import { uploadBuffer } from "../services/cloudinary.service.js";
 import { normalizeLanguage } from "../utils/language.js";
 import { activatePremium } from "../services/subscription.service.js";
 import { Analytics } from "../models/Analytics.js";
+import { SubscriptionPlan } from "../models/SubscriptionPlan.js";
 
 const parseBlogTags = (value: unknown): string[] => {
   if (Array.isArray(value)) {
@@ -571,3 +572,118 @@ export const getConfigValue = (key: string, defaultValue?: string): string => {
   // This will be populated at runtime by caching
   return defaultValue || '';
 };
+
+// Subscription Plan Management
+export const getSubscriptionPlans = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const plans = await SubscriptionPlan.find().sort({ sortOrder: 1 });
+  res.json({
+    success: true,
+    data: plans,
+  });
+});
+
+export const createSubscriptionPlan = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const {
+    name,
+    slug,
+    description,
+    priceMonthly,
+    priceYearly,
+    currency = "BDT",
+    features = [],
+    limits,
+    isActive = true,
+    sortOrder = 0,
+  } = req.body;
+
+  if (!name || !slug) {
+    throw new ApiError(400, "Plan name and slug are required");
+  }
+
+  if (typeof priceMonthly !== "number" || typeof priceYearly !== "number") {
+    throw new ApiError(400, "Monthly and yearly prices must be numbers");
+  }
+
+  // Check if slug already exists
+  const existing = await SubscriptionPlan.findOne({ slug });
+  if (existing) {
+    throw new ApiError(400, "A plan with this slug already exists");
+  }
+
+  const plan = await SubscriptionPlan.create({
+    name,
+    slug,
+    description: description || "",
+    priceMonthly,
+    priceYearly,
+    currency,
+    features: Array.isArray(features) ? features : [],
+    limits: limits || {
+      maxResumes: 2,
+      maxAiRequests: 5,
+      watermarkPdf: true,
+      premiumTemplates: false,
+      atsChecker: false,
+      coverLetters: false,
+      aiOptimization: false,
+    },
+    isActive,
+    sortOrder,
+  });
+
+  res.status(201).json({
+    success: true,
+    data: plan,
+  });
+});
+
+export const updateSubscriptionPlan = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const updateData = { ...req.body };
+
+  const plan = await SubscriptionPlan.findById(id);
+  if (!plan) {
+    throw new ApiError(404, "Subscription plan not found");
+  }
+
+  // Validate slug uniqueness if being updated
+  if (updateData.slug && updateData.slug !== plan.slug) {
+    const existing = await SubscriptionPlan.findOne({ slug: updateData.slug, _id: { $ne: id } });
+    if (existing) {
+      throw new ApiError(400, "A plan with this slug already exists");
+    }
+  }
+
+  // Update allowed fields
+  if (updateData.name !== undefined) plan.name = updateData.name;
+  if (updateData.slug !== undefined) plan.slug = updateData.slug;
+  if (updateData.description !== undefined) plan.description = updateData.description;
+  if (updateData.priceMonthly !== undefined) plan.priceMonthly = updateData.priceMonthly;
+  if (updateData.priceYearly !== undefined) plan.priceYearly = updateData.priceYearly;
+  if (updateData.currency !== undefined) plan.currency = updateData.currency;
+  if (updateData.features !== undefined) plan.features = updateData.features;
+  if (updateData.limits !== undefined) plan.limits = updateData.limits;
+  if (updateData.isActive !== undefined) plan.isActive = updateData.isActive;
+  if (updateData.sortOrder !== undefined) plan.sortOrder = updateData.sortOrder;
+
+  await plan.save();
+
+  res.json({
+    success: true,
+    data: plan,
+  });
+});
+
+export const deleteSubscriptionPlan = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+
+  const plan = await SubscriptionPlan.findByIdAndDelete(id);
+  if (!plan) {
+    throw new ApiError(404, "Subscription plan not found");
+  }
+
+  res.json({
+    success: true,
+    message: "Subscription plan deleted successfully",
+  });
+});
