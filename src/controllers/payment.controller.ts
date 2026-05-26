@@ -13,7 +13,8 @@ import { SubscriptionPlan } from "../models/SubscriptionPlan.js";
 import { BkashConfig } from "../models/BkashConfig.js";
 import { ApiError } from "../utils/ApiError.js";
 
-const normalizeBkashNumber = (value: string) => value.trim().replace(/\s+/g, "").replace(/^\+?880/, "0");
+const normalizeBkashNumber = (value?: string) =>
+  (value || "").trim().replace(/\s+/g, "").replace(/^\+?880/, "0");
 
 export const getPlans = asyncHandler(async (_req: AuthRequest, res: Response) => {
   const plans = await SubscriptionPlan.find({ isActive: true }).sort({ sortOrder: 1 });

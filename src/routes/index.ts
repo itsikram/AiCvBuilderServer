@@ -6,6 +6,7 @@ import paymentRoutes from "./payment.routes.js";
 import templateRoutes from "./template.routes.js";
 import blogRoutes from "./blog.routes.js";
 import adminRoutes from "./admin.routes.js";
+import pageContentRoutes from "./pageContent.routes.js";
 
 const router = Router();
 
@@ -15,6 +16,7 @@ router.use("/cover-letters", coverLetterRoutes);
 router.use("/payments", paymentRoutes);
 router.use("/templates", templateRoutes);
 router.use("/blogs", blogRoutes);
+router.use("/page-content", pageContentRoutes);
 router.use("/admin", adminRoutes);
 
 router.get("/health", (_req, res) => {

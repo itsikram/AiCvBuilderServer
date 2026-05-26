@@ -11,6 +11,7 @@ type PdfTemplateStyle = {
   textColor: string;
   backgroundColor: string;
   headerAlign: "left" | "center";
+  fontFamily?: string;
   headerBackground?: string;
   headerTextColor?: string;
 };
@@ -20,6 +21,7 @@ const defaultTheme = {
   headingColor: "#111827",
   textColor: "#111827",
   backgroundColor: "#ffffff",
+  fontFamily: "Inter, ui-sans-serif, system-ui",
 };
 
 const pdfTemplateStyles: Record<string, PdfTemplateStyle> = {
@@ -743,12 +745,566 @@ const renderCustomSections = (doc: InstanceType<typeof PDFDocument>, content: IR
   });
 };
 
+const getFontFamily = (fontFamily?: string) => {
+  const normalized = (fontFamily || "").toLowerCase();
+  if (normalized.includes("times") || normalized.includes("georgia") || normalized.includes("garamond")) {
+    return {
+      regular: "Times-Roman",
+      bold: "Times-Bold",
+    };
+  }
+
+  return {
+    regular: "Helvetica",
+    bold: "Helvetica-Bold",
+  };
+};
+
+const setFont = (
+  doc: InstanceType<typeof PDFDocument>,
+  font: { regular: string; bold: string },
+  size: number,
+  weight: "regular" | "bold" = "regular"
+) => {
+  doc.fontSize(size).font(weight === "bold" ? font.bold : font.regular);
+};
+
+const A4_HEIGHT = 841.89; // A4 height in points
+const A4_WIDTH = 595.28; // A4 width in points
+const MARGIN = 45;
+const CONTENT_WIDTH = A4_WIDTH - MARGIN * 2; // ~505 points
+
+const addPageBreakIfNeeded = (
+  doc: InstanceType<typeof PDFDocument>,
+  neededSpace: number,
+  margin = MARGIN
+) => {
+  if (doc.y + neededSpace > doc.page.height - margin) {
+    doc.addPage();
+    doc.y = MARGIN;
+  }
+};
+
+/**
+ * Calculate the height needed for text content
+ */
+const calculateTextHeight = (
+  doc: InstanceType<typeof PDFDocument>,
+  text: string,
+  width: number,
+  fontSize: number = 10,
+  lineGap: number = 3
+): number => {
+  const lines = doc.heightOfString(text, { width, align: "left" });
+  return lines;
+};
+
+/**
+ * Ensure an entire section stays together on one page.
+ * If the section doesn't fit on the current page, start a new page.
+ */
+const ensureSectionFits = (
+  doc: InstanceType<typeof PDFDocument>,
+  sectionHeight: number,
+  margin = MARGIN
+) => {
+  if (doc.y + sectionHeight > doc.page.height - margin) {
+    doc.addPage();
+    doc.y = margin;
+  }
+};
+
+const drawTextBlock = (
+  doc: InstanceType<typeof PDFDocument>,
+  text: string,
+  width: number,
+  options?: {
+    align?: "left" | "center" | "right";
+    lineGap?: number;
+    color?: string;
+  }
+) => {
+  doc.fillColor(options?.color || "#111827");
+  doc.text(text, 45, doc.y, {
+    width,
+    align: options?.align || "left",
+    lineGap: options?.lineGap ?? 3,
+  });
+};
+
+const drawSectionHeading = (
+  doc: InstanceType<typeof PDFDocument>,
+  title: string,
+  accentColor: string,
+  font: { regular: string; bold: string },
+  x = 45,
+  width = 520
+) => {
+  addPageBreakIfNeeded(doc, 28);
+  doc.fillColor(accentColor);
+  doc.rect(x, doc.y, width, 2).fill();
+  doc.fillColor(accentColor);
+  setFont(doc, font, 11, "bold");
+  doc.text(title.toUpperCase(), x, doc.y + 6, { width });
+  doc.y += 22;
+};
+
+const drawSummary = (
+  doc: InstanceType<typeof PDFDocument>,
+  content: IResumeContent,
+  font: { regular: string; bold: string },
+  accentColor: string,
+  width = 520
+) => {
+  if (!content.personalInfo.summary) {
+    return;
+  }
+
+  drawSectionHeading(doc, "Professional Summary", accentColor, font);
+  setFont(doc, font, 11);
+  drawTextBlock(doc, content.personalInfo.summary, width, { lineGap: 4 });
+  doc.moveDown(0.5);
+};
+
+/**
+ * Calculate the height needed for an experience entry
+ */
+const calculateExperienceHeight = (
+  doc: InstanceType<typeof PDFDocument>,
+  exp: IResumeContent["experience"][0],
+  width: number
+): number => {
+  let height = 0;
+  
+  // Position line
+  height += doc.heightOfString(exp.position, { width: width * 0.68 }) + 2;
+  
+  // Company line
+  height += doc.heightOfString(exp.company, { width: width * 0.68 }) + 2;
+  
+  // Location if exists
+  if (exp.location) {
+    height += 14;
+  }
+  
+  // Bullet points
+  exp.bullets.filter(Boolean).forEach((bullet) => {
+    height += doc.heightOfString(`• ${bullet}`, { width: width - 20, lineGap: 3 }) + 2;
+  });
+  
+  // Separator line (except last)
+  height += 10;
+  
+  return height;
+};
+
+const drawExperience = (
+  doc: InstanceType<typeof PDFDocument>,
+  content: IResumeContent,
+  font: { regular: string; bold: string },
+  accentColor: string,
+  width = 520
+) => {
+  if (!content.experience.length) {
+    return;
+  }
+
+  drawSectionHeading(doc, "Experience", accentColor, font);
+
+  content.experience.forEach((exp, index) => {
+    // Calculate total height needed for this experience entry
+    const expHeight = calculateExperienceHeight(doc, exp, width);
+    
+    // Ensure the entire experience entry fits on one page
+    addPageBreakIfNeeded(doc, expHeight + 10);
+    
+    setFont(doc, font, 11, "bold");
+    doc.fillColor("#111827");
+    doc.text(exp.position, 45, doc.y, { width: width * 0.68 });
+
+    const afterPositionY = doc.y;
+    setFont(doc, font, 10);
+    doc.fillColor("#374151");
+    doc.text(exp.company, 45, doc.y + 14, { width: width * 0.68 });
+
+    setFont(doc, font, 9);
+    doc.text(drawDateRange(exp.startDate, exp.endDate, exp.current), 45 + width * 0.68, doc.y - 10, {
+      width: width * 0.32,
+      align: "right",
+    });
+
+    if (exp.location) {
+      doc.text(exp.location, 45, doc.y + 14, { width: width * 0.68 });
+    }
+
+    doc.y += 20;
+    setFont(doc, font, 10);
+    exp.bullets.filter(Boolean).forEach((bullet) => {
+      doc.text(`• ${bullet}`, 55, doc.y, { width: width - 20, lineGap: 3 });
+      doc.moveDown(0.2);
+    });
+
+    if (index < content.experience.length - 1) {
+      doc.fillColor("#e5e7eb");
+      doc.rect(45, doc.y + 6, width, 1).fill();
+      doc.y += 10;
+    }
+  });
+
+  doc.moveDown(0.4);
+};
+
+const drawEducation = (
+  doc: InstanceType<typeof PDFDocument>,
+  content: IResumeContent,
+  font: { regular: string; bold: string },
+  accentColor: string,
+  width = 520
+) => {
+  if (!content.education.length) {
+    return;
+  }
+
+  drawSectionHeading(doc, "Education", accentColor, font);
+
+  content.education.forEach((edu) => {
+    addPageBreakIfNeeded(doc, 24);
+    setFont(doc, font, 11, "bold");
+    doc.fillColor("#111827");
+    doc.text(`${edu.degree}${edu.field ? ` in ${edu.field}` : ""}`, 45, doc.y, { width: width * 0.68 });
+
+    setFont(doc, font, 9);
+    doc.text(`${edu.startDate} - ${edu.endDate || ""}`, 45 + width * 0.68, doc.y, {
+      width: width * 0.32,
+      align: "right",
+    });
+
+    setFont(doc, font, 10);
+    doc.fillColor("#374151");
+    doc.text(`${edu.institution}${edu.gpa ? ` | GPA: ${edu.gpa}` : ""}`, 45, doc.y + 14, { width });
+    doc.y += 20;
+  });
+};
+
+const drawProjects = (
+  doc: InstanceType<typeof PDFDocument>,
+  content: IResumeContent,
+  font: { regular: string; bold: string },
+  accentColor: string,
+  width = 520
+) => {
+  if (!content.projects.length) {
+    return;
+  }
+
+  drawSectionHeading(doc, "Projects", accentColor, font);
+
+  content.projects.forEach((project) => {
+    addPageBreakIfNeeded(doc, 24);
+    setFont(doc, font, 11, "bold");
+    doc.fillColor("#111827");
+    doc.text(project.name, 45, doc.y, { width });
+
+    setFont(doc, font, 10);
+    doc.fillColor("#374151");
+    doc.text(project.description, 45, doc.y + 14, { width, lineGap: 3 });
+    doc.y += 12;
+
+    if (project.technologies.length) {
+      setFont(doc, font, 9);
+      doc.text(`Technologies: ${project.technologies.join(", ")}`, 45, doc.y, { width });
+      doc.y += 12;
+    }
+  });
+};
+
+const drawSidebarBlocks = (
+  doc: InstanceType<typeof PDFDocument>,
+  content: IResumeContent,
+  font: { regular: string; bold: string },
+  accentColor: string
+) => {
+  const width = 220;
+
+  if (content.skills.length) {
+    drawSectionHeading(doc, "Skills", accentColor, font, 45, width);
+    setFont(doc, font, 10);
+    doc.fillColor("#374151");
+    doc.text(content.skills.filter(Boolean).join(" • "), 45, doc.y, { width, lineGap: 3 });
+    doc.y += 18;
+  }
+
+  if (content.languages.length) {
+    drawSectionHeading(doc, "Languages", accentColor, font, 45, width);
+    setFont(doc, font, 10);
+    doc.fillColor("#374151");
+    doc.text(
+      content.languages.map((language) => `${language.name} (${language.proficiency})`).join(" • "),
+      45,
+      doc.y,
+      { width, lineGap: 3 }
+    );
+    doc.y += 18;
+  }
+
+  if (content.certifications.length) {
+    drawSectionHeading(doc, "Certifications", accentColor, font, 45, width);
+    setFont(doc, font, 10);
+    content.certifications.forEach((cert) => {
+      addPageBreakIfNeeded(doc, 18);
+      setFont(doc, font, 10, "bold");
+      doc.fillColor("#111827");
+      doc.text(cert.name, 45, doc.y, { width });
+      setFont(doc, font, 9);
+      doc.fillColor("#374151");
+      doc.text(`${cert.issuer} | ${cert.date}`, 45, doc.y + 14, { width });
+      doc.y += 24;
+    });
+  }
+};
+
+const drawAdditionalSections = (
+  doc: InstanceType<typeof PDFDocument>,
+  content: IResumeContent,
+  font: { regular: string; bold: string },
+  accentColor: string,
+  width = 520
+) => {
+  const sectionRenderers = [
+    {
+      condition: content.awards.length > 0,
+      title: "Awards",
+      render: () => {
+        content.awards.forEach((award) => {
+          addPageBreakIfNeeded(doc, 20);
+          setFont(doc, font, 11, "bold");
+          doc.fillColor("#111827");
+          doc.text(award.title, 45, doc.y, { width: width * 0.68 });
+          setFont(doc, font, 9);
+          doc.fillColor("#374151");
+          doc.text(`${award.issuer} | ${award.date}`, 45 + width * 0.68, doc.y, {
+            width: width * 0.32,
+            align: "right",
+          });
+          if (award.description) {
+            setFont(doc, font, 10);
+            doc.fillColor("#374151");
+            doc.text(award.description, 45, doc.y + 14, { width, lineGap: 3 });
+            doc.y += 12;
+          }
+          doc.y += 12;
+        });
+      },
+    },
+    {
+      condition: content.publications.length > 0,
+      title: "Publications",
+      render: () => {
+        content.publications.forEach((publication) => {
+          addPageBreakIfNeeded(doc, 20);
+          setFont(doc, font, 11, "bold");
+          doc.fillColor("#111827");
+          doc.text(publication.title, 45, doc.y, { width: width * 0.68 });
+          setFont(doc, font, 9);
+          doc.fillColor("#374151");
+          doc.text(`${publication.publisher} | ${publication.date}`, 45 + width * 0.68, doc.y, {
+            width: width * 0.32,
+            align: "right",
+          });
+          if (publication.description) {
+            setFont(doc, font, 10);
+            doc.fillColor("#374151");
+            doc.text(publication.description, 45, doc.y + 14, { width, lineGap: 3 });
+            doc.y += 12;
+          }
+          doc.y += 12;
+        });
+      },
+    },
+    {
+      condition: content.volunteerExperience.length > 0,
+      title: "Volunteer Experience",
+      render: () => {
+        content.volunteerExperience.forEach((volunteer) => {
+          addPageBreakIfNeeded(doc, 20);
+          setFont(doc, font, 11, "bold");
+          doc.fillColor("#111827");
+          doc.text(volunteer.role, 45, doc.y, { width: width * 0.68 });
+          setFont(doc, font, 9);
+          doc.fillColor("#374151");
+          doc.text(`${volunteer.organization} | ${drawDateRange(volunteer.startDate, volunteer.endDate, volunteer.current)}`, 45 + width * 0.68, doc.y, {
+            width: width * 0.32,
+            align: "right",
+          });
+          if (volunteer.description) {
+            setFont(doc, font, 10);
+            doc.fillColor("#374151");
+            doc.text(volunteer.description, 45, doc.y + 14, { width, lineGap: 3 });
+            doc.y += 12;
+          }
+          doc.y += 12;
+        });
+      },
+    },
+    {
+      condition: content.references.length > 0,
+      title: "References",
+      render: () => {
+        content.references.forEach((reference) => {
+          addPageBreakIfNeeded(doc, 18);
+          setFont(doc, font, 11, "bold");
+          doc.fillColor("#111827");
+          doc.text(reference.name, 45, doc.y, { width });
+          setFont(doc, font, 10);
+          doc.fillColor("#374151");
+          doc.text(`${reference.position} at ${reference.company}`, 45, doc.y + 14, { width });
+          if (reference.email || reference.phone) {
+            setFont(doc, font, 9);
+            doc.text([reference.email, reference.phone].filter(Boolean).join(" | "), 45, doc.y + 28, { width });
+            doc.y += 8;
+          }
+          doc.y += 12;
+        });
+      },
+    },
+    {
+      condition: content.interests.length > 0,
+      title: "Interests",
+      render: () => {
+        setFont(doc, font, 10);
+        doc.fillColor("#374151");
+        doc.text(content.interests.filter(Boolean).join(" • "), 45, doc.y, { width, lineGap: 3 });
+        doc.y += 12;
+      },
+    },
+    {
+      condition: content.courses.length > 0,
+      title: "Courses",
+      render: () => {
+        content.courses.forEach((course) => {
+          addPageBreakIfNeeded(doc, 18);
+          setFont(doc, font, 11, "bold");
+          doc.fillColor("#111827");
+          doc.text(course.name, 45, doc.y, { width: width * 0.68 });
+          setFont(doc, font, 9);
+          doc.fillColor("#374151");
+          doc.text(`${course.provider} | ${course.date}`, 45 + width * 0.68, doc.y, {
+            width: width * 0.32,
+            align: "right",
+          });
+          doc.y += 14;
+        });
+      },
+    },
+    {
+      condition: content.memberships.length > 0,
+      title: "Memberships",
+      render: () => {
+        content.memberships.forEach((membership) => {
+          addPageBreakIfNeeded(doc, 18);
+          setFont(doc, font, 11, "bold");
+          doc.fillColor("#111827");
+          doc.text(membership.organization, 45, doc.y, { width });
+          setFont(doc, font, 9);
+          doc.fillColor("#374151");
+          doc.text(
+            `${membership.role || "Member"}${membership.startDate ? ` | ${membership.startDate}` : ""}${membership.current ? " - Present" : membership.endDate ? ` - ${membership.endDate}` : ""}`,
+            45,
+            doc.y + 14,
+            { width }
+          );
+          doc.y += 20;
+        });
+      },
+    },
+    {
+      condition: content.customSections.length > 0,
+      title: "Custom Sections",
+      render: () => {
+        content.customSections.forEach((section) => {
+          addPageBreakIfNeeded(doc, 18);
+          drawSectionHeading(doc, section.title, accentColor, font);
+          setFont(doc, font, 10);
+          doc.fillColor("#374151");
+          doc.text(section.content, 45, doc.y, { width, lineGap: 3 });
+          doc.y += 12;
+        });
+      },
+    },
+  ];
+
+  sectionRenderers.forEach((section) => {
+    if (!section.condition) {
+      return;
+    }
+
+    drawSectionHeading(doc, section.title, accentColor, font);
+    section.render();
+    doc.moveDown(0.3);
+  });
+};
+
+const drawPdfHeader = async (
+  doc: InstanceType<typeof PDFDocument>,
+  content: IResumeContent,
+  style: PdfTemplateStyle,
+  font: { regular: string; bold: string }
+) => {
+  const { personalInfo } = content;
+  const photoResult = await drawProfilePhoto(doc, content, style);
+  const topPadding = photoResult.photoDrawn ? 60 : 45;
+
+  if (photoResult.photoDrawn) {
+    doc.y = topPadding;
+  } else {
+    doc.y = 45;
+  }
+
+  if (style.layout === "bold") {
+    doc.fillColor(style.headerBackground || style.accentColor);
+    doc.rect(45, doc.y, 520, 100).fill();
+    doc.fillColor(style.headerTextColor || "#ffffff");
+    setFont(doc, font, 24, "bold");
+    doc.text(personalInfo.fullName || "Your Name", 60, doc.y + 16, { width: 500 });
+    setFont(doc, font, 10);
+    doc.text([personalInfo.email, personalInfo.phone, personalInfo.location].filter(Boolean).join("  |  "), 60, doc.y + 50, { width: 500 });
+    const links = [personalInfo.linkedin, personalInfo.portfolio, personalInfo.github, personalInfo.website].filter(Boolean).join("  |  ");
+    if (links) {
+      doc.text(links, 60, doc.y + 70, { width: 500 });
+    }
+    doc.y = doc.y + 110;
+    return;
+  }
+
+  setFont(doc, font, 24, "bold");
+  doc.fillColor(style.headingColor);
+  doc.text(personalInfo.fullName || "Your Name", 45, doc.y, { width: 520, align: style.headerAlign });
+  doc.y += 16;
+  setFont(doc, font, 10);
+  doc.fillColor(style.textColor);
+  doc.text([personalInfo.email, personalInfo.phone, personalInfo.location].filter(Boolean).join("  |  "), 45, doc.y, { width: 520, align: style.headerAlign });
+
+  const links = [personalInfo.linkedin, personalInfo.portfolio, personalInfo.github, personalInfo.website].filter(Boolean).join("  |  ");
+  if (links) {
+    doc.text(links, 45, doc.y + 14, { width: 520, align: style.headerAlign });
+    doc.y += 12;
+  } else {
+    doc.y += 12;
+  }
+
+  if (style.headerAlign === "left") {
+    doc.fillColor(style.accentColor);
+    doc.rect(45, doc.y, 520, 1.5).fill();
+    doc.y += 12;
+  }
+};
+
 export const generateResumePDF = async (
   content: IResumeContent,
   options: { watermark?: boolean; format?: string; templateId?: string; theme?: Record<string, string> } = {}
 ): Promise<Buffer> => {
   return new Promise(async (resolve, reject) => {
-    const doc = new PDFDocument({ margin: 50, size: "A4" });
+    const doc = new PDFDocument({ margin: 0, size: "A4" });
     const chunks: Buffer[] = [];
 
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -756,40 +1312,28 @@ export const generateResumePDF = async (
     doc.on("error", reject);
 
     const style = getTemplateStyle(options.templateId, options.theme);
-    const pageWidth = doc.page.width - 100;
+    const font = getFontFamily(style.fontFamily);
+    const pageWidth = 520;
 
     doc.fillColor(style.backgroundColor);
     doc.rect(0, 0, doc.page.width, doc.page.height).fill();
 
-    // Draw header with profile photo (async)
-    await drawHeader(doc, content, style);
+    await drawPdfHeader(doc, content, style, font);
+    drawSummary(doc, content, font, style.accentColor, pageWidth);
+    drawExperience(doc, content, font, style.accentColor, pageWidth);
+    drawEducation(doc, content, font, style.accentColor, pageWidth);
 
     if (style.layout === "sidebar") {
-      renderSkills(doc, content, style, pageWidth);
-      renderLanguages(doc, content, style, pageWidth);
-      renderCertifications(doc, content, style, pageWidth);
-      doc.moveDown(0.5);
+      drawSidebarBlocks(doc, content, font, style.accentColor);
     }
 
-    renderSummary(doc, content, style, pageWidth);
-    renderExperience(doc, content, style, pageWidth);
-    renderEducation(doc, content, style, pageWidth);
-    renderProjects(doc, content, style, pageWidth);
+    drawProjects(doc, content, font, style.accentColor, pageWidth);
 
     if (style.layout !== "sidebar") {
-      renderSkills(doc, content, style, pageWidth);
-      renderLanguages(doc, content, style, pageWidth);
-      renderCertifications(doc, content, style, pageWidth);
+      drawSidebarBlocks(doc, content, font, style.accentColor);
     }
 
-    renderAwards(doc, content, style, pageWidth);
-    renderPublications(doc, content, style, pageWidth);
-    renderVolunteer(doc, content, style, pageWidth);
-    renderReferences(doc, content, style, pageWidth);
-    renderInterests(doc, content, style, pageWidth);
-    renderCourses(doc, content, style, pageWidth);
-    renderMemberships(doc, content, style, pageWidth);
-    renderCustomSections(doc, content, style, pageWidth);
+    drawAdditionalSections(doc, content, font, style.accentColor, pageWidth);
 
     if (options.watermark) {
       doc.save();
