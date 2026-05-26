@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && npm run build:client",
+    "build:client": "cd ../client && npm run build",
     "start": "tsx src/index.ts",
     "seed": "tsx src/scripts/seed.ts"
   },
