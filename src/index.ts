@@ -36,15 +36,28 @@ app.use(generalLimiter);
 
 // Serve static files from the React app in production
 if (config.env === "production") {
+  const clientDistPath = path.join(__dirname, "../../client/dist");
+  
+  // Custom middleware to serve static files or pass to next handler
+  app.use((req, res, next) => {
+    // If it's an API request, skip static serving
+    if (req.path.startsWith("/api/")) {
+      return next();
+    }
+    next();
+  });
+  
   // Serve static assets from the client build
-  app.use(express.static(path.join(__dirname, "../../client/dist")));
+  app.use(express.static(clientDistPath, {
+    fallthrough: true // Let non-existent files pass through to the next handler
+  }));
 }
 
 app.use("/api/v1", routes);
 
-app.get("/", (_req, res) => {
+// Root route
+app.get("/", (req, res) => {
   if (config.env === "production") {
-    // Serve the React app's index.html
     res.sendFile(path.join(__dirname, "../../client/dist/index.html"));
   } else {
     res.json({
@@ -55,8 +68,8 @@ app.get("/", (_req, res) => {
   }
 });
 
-// SPA fallback - serve index.html for all other routes
-app.get("*", (_req, res) => {
+// SPA catch-all route - must come BEFORE notFound middleware
+app.get("*", (req, res) => {
   if (config.env === "production") {
     res.sendFile(path.join(__dirname, "../../client/dist/index.html"));
   } else {
