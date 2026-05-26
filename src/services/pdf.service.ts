@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import { IResumeContent } from "../models/Resume.js";
+import axios from "axios";
 
 type PdfLayout = "classic" | "sidebar" | "compact" | "bold";
 
@@ -322,22 +323,99 @@ const drawDateRange = (startDate: string, endDate: string | undefined, current: 
   return `${startDate} - ${current ? "Present" : endDate || ""}`;
 };
 
-const drawHeader = (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
+const drawProfilePhoto = async (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle): Promise<{ photoDrawn: boolean; photoHeight: number }> => {
+  const { personalInfo } = content;
+  if (!personalInfo.profilePhoto) {
+    return { photoDrawn: false, photoHeight: 0 };
+  }
+
+  try {
+    let photoSize = 80; // medium size
+    if (personalInfo.profilePhotoSize === "large") photoSize = 100;
+    if (personalInfo.profilePhotoSize === "small") photoSize = 60;
+
+    let imageData: Buffer | null = null;
+    
+    // Handle base64 data URL
+    if (personalInfo.profilePhoto.startsWith('data:')) {
+      const matches = personalInfo.profilePhoto.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (matches && matches[2]) {
+        imageData = Buffer.from(matches[2], 'base64');
+      }
+    } else {
+      // Handle URL
+      try {
+        const response = await axios.get(personalInfo.profilePhoto, { 
+          responseType: 'arraybuffer',
+          timeout: 5000
+        });
+        imageData = Buffer.from(response.data);
+      } catch (error) {
+        console.error('Failed to fetch profile photo:', error);
+        return { photoDrawn: false, photoHeight: 0 };
+      }
+    }
+
+    if (!imageData) {
+      return { photoDrawn: false, photoHeight: 0 };
+    }
+
+    // Calculate position based on alignment
+    let photoX = doc.page.width / 2 - photoSize / 2; // center
+    if (personalInfo.profilePhotoAlignment === "left") {
+      photoX = 50;
+    } else if (personalInfo.profilePhotoAlignment === "right") {
+      photoX = doc.page.width - 50 - photoSize;
+    }
+
+    const photoY = 50;
+
+    // Draw circular photo (using clip path)
+    doc.save();
+    doc.roundedRect(photoX, photoY, photoSize, photoSize, photoSize / 2);
+    doc.clip();
+    doc.image(imageData, photoX, photoY, { width: photoSize, height: photoSize });
+    doc.restore();
+
+    // Add border
+    doc.lineWidth(2);
+    doc.strokeColor(style.accentColor);
+    doc.roundedRect(photoX, photoY, photoSize, photoSize, photoSize / 2);
+    doc.stroke();
+
+    return { photoDrawn: true, photoHeight: photoSize + 20 };
+  } catch (error) {
+    console.error('Error drawing profile photo:', error);
+    return { photoDrawn: false, photoHeight: 0 };
+  }
+};
+
+const drawHeader = async (doc: InstanceType<typeof PDFDocument>, content: IResumeContent, style: PdfTemplateStyle) => {
   const { personalInfo } = content;
   const fullName = personalInfo.fullName || "Your Name";
   const contactLine = [personalInfo.email, personalInfo.phone, personalInfo.location].filter(Boolean).join("  |  ");
   const links = [personalInfo.linkedin, personalInfo.portfolio, personalInfo.github, personalInfo.website].filter(Boolean).join("  |  ");
 
+  // Draw profile photo first if exists
+  const photoResult = await drawProfilePhoto(doc, content, style);
+  
+  // Adjust starting Y position if photo was drawn
+  if (photoResult.photoDrawn) {
+    doc.moveDown(photoResult.photoHeight / 12);
+  }
+
   if (style.layout === "bold") {
+    const headerStartY = photoResult.photoDrawn ? doc.y : 50;
     doc.fillColor(style.headerBackground || style.accentColor);
-    doc.rect(40, 40, 520, 120).fill();
+    doc.rect(40, headerStartY, 520, 100).fill();
     doc.fillColor(style.headerTextColor || "#ffffff");
-    doc.fontSize(24).font("Helvetica-Bold").text(fullName, 55, 65, { width: 490 });
-    doc.fontSize(10).font("Helvetica").text(contactLine, 55, 100, { width: 490 });
+    doc.fontSize(24).font("Helvetica-Bold").text(fullName, 55, headerStartY + 15, { width: 490 });
+    doc.fontSize(10).font("Helvetica").text(contactLine, 55, headerStartY + 50, { width: 490 });
     if (links) {
-      doc.text(links, 55, 115, { width: 490 });
+      doc.text(links, 55, headerStartY + 70, { width: 490 });
     }
-    doc.moveDown(1.8);
+    doc.y = headerStartY + 110;
+    doc.moveDown(0.5);
     return;
   }
 
@@ -590,11 +668,11 @@ const renderCustomSections = (doc: InstanceType<typeof PDFDocument>, content: IR
   });
 };
 
-export const generateResumePDF = (
+export const generateResumePDF = async (
   content: IResumeContent,
   options: { watermark?: boolean; format?: string; templateId?: string; theme?: Record<string, string> } = {}
 ): Promise<Buffer> => {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const doc = new PDFDocument({ margin: 50, size: "A4" });
     const chunks: Buffer[] = [];
 
@@ -608,7 +686,8 @@ export const generateResumePDF = (
     doc.fillColor(style.backgroundColor);
     doc.rect(0, 0, doc.page.width, doc.page.height).fill();
 
-    drawHeader(doc, content, style);
+    // Draw header with profile photo (async)
+    await drawHeader(doc, content, style);
 
     if (style.layout === "sidebar") {
       renderSkills(doc, content, style);

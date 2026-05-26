@@ -7,6 +7,7 @@ import { Template } from "../models/Template.js";
 import { Blog } from "../models/Blog.js";
 import { PageContent } from "../models/PageContent.js";
 import { BkashConfig } from "../models/BkashConfig.js";
+import { AdminSetting } from "../models/AdminSetting.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
@@ -16,7 +17,6 @@ import { uploadBuffer } from "../services/cloudinary.service.js";
 import { normalizeLanguage } from "../utils/language.js";
 import { activatePremium } from "../services/subscription.service.js";
 import { Analytics } from "../models/Analytics.js";
-import { User } from "../models/User.js";
 
 const parseBlogTags = (value: unknown): string[] => {
   if (Array.isArray(value)) {
@@ -444,3 +444,130 @@ export const getAllPageContents = asyncHandler(async (_req: AuthRequest, res: Re
     data: contents,
   });
 });
+
+// Admin Settings Management (for env file values)
+// Allowed settings keys that can be managed via admin panel
+const ALLOWED_SETTINGS_KEYS = [
+  'SITE_NAME',
+  'SITE_TAGLINE',
+  'SUPPORT_EMAIL',
+  'CONTACT_EMAIL',
+  'COMPANY_NAME',
+  'COMPANY_ADDRESS',
+  'COMPANY_PHONE',
+  'DEFAULT_CURRENCY',
+  'TAX_RATE',
+  'REFERRAL_BONUS_AMOUNT',
+  'MAX_RESUMES_FREE',
+  'MAX_AI_REQUESTS_FREE',
+  'MAX_RESUMES_PREMIUM',
+  'MAX_AI_REQUESTS_PREMIUM',
+  'MAINTENANCE_MODE',
+  'REGISTRATION_ENABLED',
+  'GOOGLE_CLIENT_ID',
+  'SSL_COMMERZ_STORE_ID',
+  'SSL_COMMERZ_STORE_PASSWD',
+  'SMTP_HOST',
+  'SMTP_PORT',
+  'SMTP_FROM_EMAIL',
+  'SMTP_FROM_NAME',
+  'CLOUDINARY_CLOUD_NAME',
+  'CLOUDINARY_API_KEY',
+  'NAGAD_MERCHANT_NUMBER',
+  'NAGAD_MERCHANT_PASSWORD',
+];
+
+export const getAdminSettings = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const settings = await AdminSetting.find().sort({ key: 1 });
+  
+  // Build a map of all settings
+  const settingsMap: Record<string, { value: string; updatedAt: Date; updatedBy?: string }> = {};
+  
+  for (const setting of settings) {
+    let updatedByName: string | undefined;
+    if (setting.updatedBy) {
+      const updater = await User.findById(setting.updatedBy).select('name');
+      updatedByName = updater?.name;
+    }
+    
+    settingsMap[setting.key] = {
+      value: setting.value,
+      updatedAt: setting.updatedAt,
+      updatedBy: updatedByName,
+    };
+  }
+  
+  // Include allowed keys even if not set (with empty values)
+  for (const key of ALLOWED_SETTINGS_KEYS) {
+    if (!settingsMap[key]) {
+      settingsMap[key] = {
+        value: process.env[key] || '',
+        updatedAt: new Date(),
+      };
+    }
+  }
+  
+  res.json({
+    success: true,
+    data: settingsMap,
+    allowedKeys: ALLOWED_SETTINGS_KEYS,
+  });
+});
+
+export const updateAdminSetting = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { key, value } = req.body;
+  
+  if (!key || typeof key !== 'string') {
+    throw new ApiError(400, 'Setting key is required');
+  }
+  
+  if (!ALLOWED_SETTINGS_KEYS.includes(key)) {
+    throw new ApiError(403, `Cannot modify setting: ${key}. Only admin-configurable settings are allowed.`);
+  }
+  
+  const setting = await AdminSetting.findOneAndUpdate(
+    { key },
+    { 
+      key, 
+      value: value !== undefined ? String(value) : '',
+      updatedBy: req.user!.userId 
+    },
+    { new: true, upsert: true, runValidators: true }
+  );
+  
+  res.json({
+    success: true,
+    data: setting,
+  });
+});
+
+export const deleteAdminSetting = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const key = typeof req.params.key === 'string' ? req.params.key : '';
+  
+  if (!key || !ALLOWED_SETTINGS_KEYS.includes(key)) {
+    throw new ApiError(403, `Cannot delete setting: ${key}`);
+  }
+  
+  const setting = await AdminSetting.findOneAndDelete({ key });
+  
+  if (!setting) {
+    throw new ApiError(404, 'Setting not found');
+  }
+  
+  res.json({
+    success: true,
+    message: 'Setting deleted successfully',
+  });
+});
+
+// Helper function to get config value with priority: env > admin settings
+export const getConfigValue = (key: string, defaultValue?: string): string => {
+  // First priority: environment variable
+  const envValue = process.env[key];
+  if (envValue !== undefined && envValue !== '') {
+    return envValue;
+  }
+  
+  // This will be populated at runtime by caching
+  return defaultValue || '';
+};

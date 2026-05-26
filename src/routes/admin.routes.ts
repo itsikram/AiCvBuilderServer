@@ -50,4 +50,9 @@ router.post("/page-content", adminController.createPageContent);
 router.patch("/page-content/:id", adminController.updatePageContent);
 router.delete("/page-content/:id", adminController.deletePageContent);
 
+// Admin Settings Management (env file values)
+router.get("/settings", adminController.getAdminSettings);
+router.put("/settings", adminController.updateAdminSetting);
+router.delete("/settings/:key", adminController.deleteAdminSetting);
+
 export default router;
