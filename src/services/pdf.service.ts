@@ -14,6 +14,15 @@ type PdfTemplateStyle = {
   fontFamily?: string;
   headerBackground?: string;
   headerTextColor?: string;
+  nameFontSize?: number;
+  headingFontSize?: number;
+  bodyFontSize?: number;
+  sectionSpacing?: "small" | "medium" | "large";
+  gradientStart?: string;
+  gradientEnd?: string;
+  gradientDirection?: string;
+  backgroundImage?: string;
+  backgroundOpacity?: number;
 };
 
 const defaultTheme = {
@@ -838,15 +847,27 @@ const drawSectionHeading = (
   accentColor: string,
   font: { regular: string; bold: string },
   x = 45,
-  width = 520
+  width = 505,
+  headingFontSize = 11,
+  sectionSpacing = "medium"
 ) => {
-  addPageBreakIfNeeded(doc, 28);
+  // Calculate spacing based on setting
+  const spacingAfterLine = sectionSpacing === "small" ? 16 : sectionSpacing === "large" ? 28 : 22;
+  const spacingBeforeSection = sectionSpacing === "small" ? 8 : sectionSpacing === "large" ? 16 : 12;
+  
+  addPageBreakIfNeeded(doc, spacingBeforeSection + spacingAfterLine + 10);
+  
+  // Draw full-width accent line (spanning entire content area)
   doc.fillColor(accentColor);
   doc.rect(x, doc.y, width, 2).fill();
+  
+  // Draw title with improved spacing
   doc.fillColor(accentColor);
-  setFont(doc, font, 11, "bold");
+  setFont(doc, font, headingFontSize, "bold");
   doc.text(title.toUpperCase(), x, doc.y + 6, { width });
-  doc.y += 22;
+  
+  // Move cursor down past the title with appropriate spacing
+  doc.y += spacingAfterLine;
 };
 
 const drawSummary = (
@@ -1313,28 +1334,274 @@ export const generateResumePDF = async (
 
     const style = getTemplateStyle(options.templateId, options.theme);
     const font = getFontFamily(style.fontFamily);
-    const pageWidth = 520;
+    const pageWidth = 505; // Full content width (A4 width - 2 * margin)
 
-    doc.fillColor(style.backgroundColor);
-    doc.rect(0, 0, doc.page.width, doc.page.height).fill();
+    // Parse font sizes from theme (default values if not set)
+    const nameFontSize = style.nameFontSize ? parseInt(String(style.nameFontSize)) : 24;
+    const headingFontSize = style.headingFontSize ? parseInt(String(style.headingFontSize)) : 11;
+    const bodyFontSize = style.bodyFontSize ? parseInt(String(style.bodyFontSize)) : 10;
+    const sectionSpacing = style.sectionSpacing as "small" | "medium" | "large" || "medium";
 
-    await drawPdfHeader(doc, content, style, font);
-    drawSummary(doc, content, font, style.accentColor, pageWidth);
-    drawExperience(doc, content, font, style.accentColor, pageWidth);
-    drawEducation(doc, content, font, style.accentColor, pageWidth);
-
-    if (style.layout === "sidebar") {
-      drawSidebarBlocks(doc, content, font, style.accentColor);
+    // Draw background (solid color, gradient, or image)
+    if (style.gradientStart && style.gradientEnd) {
+      // Draw gradient background using two overlapping rectangles with different opacities
+      doc.fillColor(style.gradientStart);
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill();
+      
+      // Create a subtle gradient effect with a second layer
+      const rgb1 = hexToRgb(style.gradientStart);
+      const rgb2 = hexToRgb(style.gradientEnd);
+      
+      // Draw a gradient-like effect using multiple thin rectangles
+      const steps = 20;
+      for (let i = 0; i < steps; i++) {
+        const ratio = i / steps;
+        const r = Math.round(rgb1.r + (rgb2.r - rgb1.r) * ratio);
+        const g = Math.round(rgb1.g + (rgb2.g - rgb1.g) * ratio);
+        const b = Math.round(rgb1.b + (rgb2.b - rgb1.b) * ratio);
+        doc.fillColor(`rgb(${r},${g},${b})`);
+        const y = (doc.page.height / steps) * i;
+        const h = doc.page.height / steps + 1;
+        doc.rect(0, y, doc.page.width, h).fill();
+      }
+    } else if (style.backgroundImage) {
+      // Draw solid background color first
+      doc.fillColor(style.backgroundColor);
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill();
+      
+      // Draw background image with opacity
+      try {
+        const bgOpacity = style.backgroundOpacity ? parseInt(String(style.backgroundOpacity)) / 100 : 0.1;
+        let imageBuffer: Buffer | null = null;
+        
+        if (style.backgroundImage.startsWith('data:')) {
+          const matches = style.backgroundImage.match(/^data:image\/(\w+);base64,(.+)$/);
+          if (matches && matches[2]) {
+            imageBuffer = Buffer.from(matches[2], 'base64');
+          }
+        } else {
+          try {
+            const response = await axios.get(style.backgroundImage, { 
+              responseType: 'arraybuffer',
+              timeout: 5000
+            });
+            imageBuffer = Buffer.from(response.data);
+          } catch (error) {
+            console.error('Failed to fetch background image:', error);
+          }
+        }
+        
+        if (imageBuffer) {
+          doc.opacity(bgOpacity);
+          doc.image(imageBuffer, 0, 0, { width: doc.page.width, height: doc.page.height });
+          doc.opacity(1);
+        }
+      } catch (error) {
+        console.error('Error drawing background image:', error);
+      }
+    } else {
+      // Draw solid background color
+      doc.fillColor(style.backgroundColor);
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill();
     }
 
-    drawProjects(doc, content, font, style.accentColor, pageWidth);
-
-    if (style.layout !== "sidebar") {
-      drawSidebarBlocks(doc, content, font, style.accentColor);
+    // Draw header with configurable name font size
+    await drawPdfHeader(doc, content, { ...style, nameFontSize }, font);
+    
+    // Draw summary with configurable font sizes and spacing
+    if (content.personalInfo.summary) {
+      drawSectionHeading(doc, "Professional Summary", style.accentColor, font, 45, pageWidth, headingFontSize, sectionSpacing);
+      setFont(doc, font, bodyFontSize);
+      doc.fillColor(style.textColor);
+      doc.text(content.personalInfo.summary, 45, doc.y, { width: pageWidth, lineGap: 3 });
+      doc.y += sectionSpacing === "small" ? 8 : sectionSpacing === "large" ? 16 : 12;
     }
 
-    drawAdditionalSections(doc, content, font, style.accentColor, pageWidth);
+    // Draw experience with configurable font sizes and spacing
+    if (content.experience.length > 0) {
+      drawSectionHeading(doc, "Experience", style.accentColor, font, 45, pageWidth, headingFontSize, sectionSpacing);
+      content.experience.forEach((exp, index) => {
+        const expHeight = calculateExperienceHeight(doc, exp, pageWidth);
+        addPageBreakIfNeeded(doc, expHeight + 10);
+        
+        setFont(doc, font, bodyFontSize + 1, "bold");
+        doc.fillColor(style.headingColor);
+        doc.text(exp.position, 45, doc.y, { width: pageWidth * 0.68 });
 
+        setFont(doc, font, bodyFontSize);
+        doc.fillColor(style.textColor);
+        doc.text(exp.company, 45, doc.y + 14, { width: pageWidth * 0.68 });
+
+        setFont(doc, font, bodyFontSize - 1);
+        doc.text(drawDateRange(exp.startDate, exp.endDate, exp.current), 45 + pageWidth * 0.68, doc.y - 10, {
+          width: pageWidth * 0.32,
+          align: "right",
+        });
+
+        if (exp.location) {
+          doc.text(exp.location, 45, doc.y + 14, { width: pageWidth * 0.68 });
+        }
+
+        doc.y += 20;
+        setFont(doc, font, bodyFontSize);
+        exp.bullets.filter(Boolean).forEach((bullet) => {
+          doc.text(`• ${bullet}`, 55, doc.y, { width: pageWidth - 20, lineGap: 2 });
+          doc.moveDown(0.2);
+        });
+
+        if (index < content.experience.length - 1) {
+          doc.fillColor("#e5e7eb");
+          doc.rect(45, doc.y + 6, pageWidth, 1).fill();
+          doc.y += 10;
+        }
+      });
+      doc.moveDown(sectionSpacing === "small" ? 0.3 : sectionSpacing === "large" ? 0.6 : 0.4);
+    }
+
+    // Draw education with configurable font sizes
+    if (content.education.length > 0) {
+      drawSectionHeading(doc, "Education", style.accentColor, font, 45, pageWidth, headingFontSize, sectionSpacing);
+      content.education.forEach((edu) => {
+        addPageBreakIfNeeded(doc, 24);
+        setFont(doc, font, bodyFontSize + 1, "bold");
+        doc.fillColor(style.headingColor);
+        doc.text(`${edu.degree}${edu.field ? ` in ${edu.field}` : ""}`, 45, doc.y, { width: pageWidth * 0.68 });
+
+        setFont(doc, font, bodyFontSize - 1);
+        doc.text(`${edu.startDate} - ${edu.endDate || ""}`, 45 + pageWidth * 0.68, doc.y, {
+          width: pageWidth * 0.32,
+          align: "right",
+        });
+
+        setFont(doc, font, bodyFontSize);
+        doc.fillColor(style.textColor);
+        doc.text(`${edu.institution}${edu.gpa ? ` | GPA: ${edu.gpa}` : ""}`, 45, doc.y + 14, { width: pageWidth });
+        doc.y += 20;
+      });
+    }
+
+    // Draw sidebar blocks (skills, languages, certifications)
+    const sidebarWidth = 220;
+    if (content.skills.length) {
+      drawSectionHeading(doc, "Skills", style.accentColor, font, 45, sidebarWidth, headingFontSize, sectionSpacing);
+      setFont(doc, font, bodyFontSize);
+      doc.fillColor(style.textColor);
+      doc.text(content.skills.filter(Boolean).join(" • "), 45, doc.y, { width: sidebarWidth, lineGap: 3 });
+      doc.y += 18;
+    }
+
+    if (content.languages.length) {
+      drawSectionHeading(doc, "Languages", style.accentColor, font, 45, sidebarWidth, headingFontSize, sectionSpacing);
+      setFont(doc, font, bodyFontSize);
+      doc.fillColor(style.textColor);
+      doc.text(
+        content.languages.map((language) => `${language.name} (${language.proficiency})`).join(" • "),
+        45, doc.y, { width: sidebarWidth, lineGap: 3 }
+      );
+      doc.y += 18;
+    }
+
+    if (content.certifications.length) {
+      drawSectionHeading(doc, "Certifications", style.accentColor, font, 45, sidebarWidth, headingFontSize, sectionSpacing);
+      setFont(doc, font, bodyFontSize);
+      content.certifications.forEach((cert) => {
+        addPageBreakIfNeeded(doc, 18);
+        setFont(doc, font, bodyFontSize, "bold");
+        doc.fillColor(style.headingColor);
+        doc.text(cert.name, 45, doc.y, { width: sidebarWidth });
+        setFont(doc, font, bodyFontSize - 1);
+        doc.fillColor(style.textColor);
+        doc.text(`${cert.issuer} | ${cert.date}`, 45, doc.y + 14, { width: sidebarWidth });
+        doc.y += 24;
+      });
+    }
+
+    // Draw projects
+    if (content.projects.length > 0) {
+      drawSectionHeading(doc, "Projects", style.accentColor, font, 45, pageWidth, headingFontSize, sectionSpacing);
+      content.projects.forEach((project) => {
+        addPageBreakIfNeeded(doc, 24);
+        setFont(doc, font, bodyFontSize + 1, "bold");
+        doc.fillColor(style.headingColor);
+        doc.text(project.name, 45, doc.y, { width: pageWidth });
+
+        setFont(doc, font, bodyFontSize);
+        doc.fillColor(style.textColor);
+        doc.text(project.description, 45, doc.y + 14, { width: pageWidth, lineGap: 3 });
+        doc.y += 12;
+
+        if (project.technologies.length) {
+          setFont(doc, font, bodyFontSize - 1);
+          doc.text(`Technologies: ${project.technologies.join(", ")}`, 45, doc.y, { width: pageWidth });
+          doc.y += 12;
+        }
+      });
+    }
+
+    // Draw additional sections
+    const additionalSections = [
+      { condition: content.awards.length > 0, title: "Awards", items: content.awards },
+      { condition: content.publications.length > 0, title: "Publications", items: content.publications },
+      { condition: content.volunteerExperience.length > 0, title: "Volunteer Experience", items: content.volunteerExperience },
+      { condition: content.references.length > 0, title: "References", items: content.references },
+      { condition: content.interests.length > 0, title: "Interests", items: content.interests },
+      { condition: content.courses.length > 0, title: "Courses", items: content.courses },
+      { condition: content.memberships.length > 0, title: "Memberships", items: content.memberships },
+    ];
+
+    additionalSections.forEach((section) => {
+      if (!section.condition) return;
+
+      if (section.title === "Interests") {
+        drawSectionHeading(doc, section.title, style.accentColor, font, 45, pageWidth, headingFontSize, sectionSpacing);
+        setFont(doc, font, bodyFontSize);
+        doc.fillColor(style.textColor);
+        doc.text(formatList(section.items as string[]), 45, doc.y, { width: pageWidth, lineGap: 3 });
+        doc.y += 12;
+      } else {
+        drawSectionHeading(doc, section.title, style.accentColor, font, 45, pageWidth, headingFontSize, sectionSpacing);
+        (section.items as any[]).forEach((item: any) => {
+          addPageBreakIfNeeded(doc, 20);
+          setFont(doc, font, bodyFontSize + 1, "bold");
+          doc.fillColor(style.headingColor);
+          
+          const title = item.title || item.name || item.organization || item.role || "";
+          doc.text(title, 45, doc.y, { width: pageWidth * 0.68 });
+
+          setFont(doc, font, bodyFontSize - 1);
+          doc.fillColor(style.textColor);
+          
+          const meta = item.issuer || item.publisher || item.organization || item.provider || "";
+          const date = item.date || item.startDate ? `${item.startDate || ""} - ${item.endDate || item.current ? "Present" : ""}` : "";
+          if (meta || date) {
+            doc.text([meta, date].filter(Boolean).join(" | "), 45 + pageWidth * 0.68, doc.y, {
+              width: pageWidth * 0.32,
+              align: "right",
+            });
+          }
+
+          if (item.description) {
+            setFont(doc, font, bodyFontSize);
+            doc.text(item.description, 45, doc.y + 14, { width: pageWidth, lineGap: 3 });
+            doc.y += 12;
+          }
+          doc.y += 12;
+        });
+      }
+    });
+
+    // Draw custom sections
+    if (content.customSections.length > 0) {
+      content.customSections.forEach((section) => {
+        drawSectionHeading(doc, section.title, style.accentColor, font, 45, pageWidth, headingFontSize, sectionSpacing);
+        setFont(doc, font, bodyFontSize);
+        doc.fillColor(style.textColor);
+        doc.text(section.content, 45, doc.y, { width: pageWidth, lineGap: 3 });
+        doc.y += 12;
+      });
+    }
+
+    // Add watermark if enabled
     if (options.watermark) {
       doc.save();
       doc.rotate(-45, { origin: [300, 400] });
