@@ -38,6 +38,7 @@ router.patch("/coupons/:id", adminController.updateCoupon);
 router.get("/templates", adminController.manageTemplates);
 router.post("/templates", adminController.manageTemplates);
 router.patch("/templates/:id", adminController.updateTemplate);
+router.delete("/templates/:id", adminController.deleteTemplate);
 router.get("/blogs", adminController.manageBlogs);
 router.post("/blogs", uploadBlogCover, adminController.createBlog);
 router.patch("/blogs/:id", uploadBlogCover, adminController.updateBlog);

@@ -419,38 +419,95 @@ const drawHeader = async (doc: InstanceType<typeof PDFDocument>, content: IResum
   // Draw profile photo first if exists
   const photoResult = await drawProfilePhoto(doc, content, style);
   
-  // Adjust starting Y position if photo was drawn
+  // Calculate header start position
+  let headerStartY = 50;
+  let nameX = 50;
+  const pageWidth = doc.page.width;
+  const contentWidth = pageWidth - 100; // 50px margins on each side
+  
+  // If photo exists, position text to the right or below based on alignment
   if (photoResult.photoDrawn) {
-    doc.moveDown(photoResult.photoHeight / 12);
+    const photoSize = personalInfo.profilePhotoSize === "large" ? 100 : personalInfo.profilePhotoSize === "small" ? 60 : 80;
+    const photoTopY = 50;
+    
+    if (personalInfo.profilePhotoAlignment === "left") {
+      // Photo on left, text on right
+      nameX = 50 + photoSize + 15;
+      headerStartY = photoTopY;
+    } else if (personalInfo.profilePhotoAlignment === "right") {
+      // Photo on right, text on left
+      nameX = 50;
+      headerStartY = photoTopY;
+    } else {
+      // Photo centered, text below
+      headerStartY = photoTopY + photoSize + 15;
+    }
+    
+    // Set doc.y to account for photo height if centered
+    if (personalInfo.profilePhotoAlignment === "center") {
+      doc.y = headerStartY;
+    }
   }
 
   if (style.layout === "bold") {
-    const headerStartY = photoResult.photoDrawn ? doc.y : 50;
+    const boldHeaderHeight = 100;
+    const boldStartY = headerStartY;
+    
+    // Draw header background
     doc.fillColor(style.headerBackground || style.accentColor);
-    doc.rect(40, headerStartY, 520, 100).fill();
+    doc.rect(40, boldStartY, pageWidth - 80, boldHeaderHeight).fill();
+    
+    // Draw header text
     doc.fillColor(style.headerTextColor || "#ffffff");
-    doc.fontSize(24).font("Helvetica-Bold").text(fullName, 55, headerStartY + 15, { width: 490 });
-    doc.fontSize(10).font("Helvetica").text(contactLine, 55, headerStartY + 50, { width: 490 });
+    doc.fontSize(24).font("Helvetica-Bold");
+    const nameWidth = doc.widthOfString(fullName);
+    const nameStartX = style.headerAlign === "center" 
+      ? (pageWidth - nameWidth) / 2 
+      : 55;
+    doc.text(fullName, nameStartX, boldStartY + 15, { width: pageWidth - 110 });
+    
+    doc.fontSize(10).font("Helvetica");
+    doc.text(contactLine, 55, boldStartY + 50, { width: pageWidth - 110 });
     if (links) {
-      doc.text(links, 55, headerStartY + 70, { width: 490 });
+      doc.text(links, 55, boldStartY + 70, { width: pageWidth - 110 });
     }
-    doc.y = headerStartY + 110;
+    
+    doc.y = boldStartY + boldHeaderHeight + 10;
     doc.moveDown(0.5);
     return;
   }
 
+  // Classic/compact layout
   doc.fillColor(style.headingColor);
-  doc.fontSize(24).font("Helvetica-Bold").text(fullName, { align: style.headerAlign });
-  doc.moveDown(0.2);
-  doc.fillColor(style.textColor);
-  doc.fontSize(10).font("Helvetica").text(contactLine, { align: style.headerAlign });
-  if (links) {
-    doc.text(links, { align: style.headerAlign });
+  doc.fontSize(24).font("Helvetica-Bold");
+  
+  // Calculate text position based on alignment
+  let textX = nameX;
+  let textWidth = contentWidth;
+  
+  if (personalInfo.profilePhotoAlignment === "left" && photoResult.photoDrawn) {
+    textX = 50 + (personalInfo.profilePhotoSize === "large" ? 100 : personalInfo.profilePhotoSize === "small" ? 60 : 80) + 15;
+    textWidth = pageWidth - textX - 50;
+  } else if (personalInfo.profilePhotoAlignment === "right" && photoResult.photoDrawn) {
+    textWidth = pageWidth - 50 - (personalInfo.profilePhotoSize === "large" ? 100 : personalInfo.profilePhotoSize === "small" ? 60 : 80) - 15;
   }
+  
+  doc.text(fullName, textX, headerStartY, { width: textWidth, align: style.headerAlign === "center" ? "center" : "left" });
+  
+  doc.moveDown(0.3);
+  doc.fillColor(style.textColor);
+  doc.fontSize(10).font("Helvetica");
+  doc.text(contactLine, textX, doc.y, { width: textWidth, align: style.headerAlign === "center" ? "center" : "left" });
+  
+  if (links) {
+    doc.moveDown(0.2);
+    doc.text(links, textX, doc.y, { width: textWidth, align: style.headerAlign === "center" ? "center" : "left" });
+  }
+  
   doc.moveDown(0.5);
 
   if (style.headerAlign === "left") {
-    doc.strokeColor(style.accentColor).lineWidth(1).moveTo(50, doc.y).lineTo(560, doc.y).stroke();
+    doc.strokeColor(style.accentColor).lineWidth(1).moveTo(50, doc.y).lineTo(pageWidth - 50, doc.y).stroke();
     doc.moveDown(0.5);
   }
 };

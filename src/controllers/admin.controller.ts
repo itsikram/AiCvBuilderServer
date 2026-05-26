@@ -320,6 +320,12 @@ export const updateTemplate = asyncHandler(async (req: AuthRequest, res: Respons
   res.json({ success: true, data: template });
 });
 
+export const deleteTemplate = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const template = await Template.findByIdAndDelete(req.params.id);
+  if (!template) throw new ApiError(404, "Template not found");
+  res.json({ success: true, message: "Template deleted successfully" });
+});
+
 export const manageBlogs = asyncHandler(async (req: AuthRequest, res: Response) => {
   const blogs = await Blog.find().populate("author", "name").sort({ createdAt: -1 });
   res.json({ success: true, data: blogs });
