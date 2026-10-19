@@ -20,6 +20,36 @@ export interface IEducation {
   startDate: string;
   endDate?: string;
   gpa?: string;
+  /** ssc | hsc | diploma | honours | bachelor | masters | phd | other */
+  level?: string;
+  /** Education board (SSC/HSC) or university */
+  board?: string;
+  /** "5.00" (SSC/HSC GPA) or "4.00" (CGPA) */
+  gpaScale?: string;
+  passingYear?: string;
+}
+
+export interface ITraining {
+  id: string;
+  title: string;
+  institute: string;
+  duration?: string;
+  year?: string;
+  description?: string;
+}
+
+/** Optional Bangladeshi CV personal details */
+export interface IPersonalDetails {
+  fatherName?: string;
+  motherName?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  nationality?: string;
+  religion?: string;
+  maritalStatus?: string;
+  nid?: string;
+  bloodGroup?: string;
+  permanentAddress?: string;
 }
 
 export interface IProject {
@@ -110,12 +140,16 @@ export interface IResumeContent {
     github?: string;
     website?: string;
     summary: string;
+    jobTitle?: string;
     profilePhoto?: string;
     profilePhotoSize?: "small" | "medium" | "large";
     profilePhotoAlignment?: "left" | "center" | "right";
   };
+  careerObjective?: string;
+  personalDetails?: IPersonalDetails;
   experience: IExperience[];
   education: IEducation[];
+  trainings?: ITraining[];
   projects: IProject[];
   skills: string[];
   languages: ILanguage[];
@@ -179,6 +213,7 @@ const resumeSchema = new Schema<IResume>(
         github: String,
         website: String,
         summary: { type: String, default: "" },
+        jobTitle: String,
         profilePhoto: String,
         profilePhotoSize: { type: String, enum: ["small", "medium", "large"], default: "medium" },
         profilePhotoAlignment: { type: String, enum: ["left", "center", "right"], default: "center" },
@@ -195,6 +230,19 @@ const resumeSchema = new Schema<IResume>(
           bullets: [String],
         },
       ],
+      careerObjective: { type: String, default: "" },
+      personalDetails: {
+        fatherName: String,
+        motherName: String,
+        dateOfBirth: String,
+        gender: String,
+        nationality: String,
+        religion: String,
+        maritalStatus: String,
+        nid: String,
+        bloodGroup: String,
+        permanentAddress: String,
+      },
       education: [
         {
           id: String,
@@ -204,6 +252,20 @@ const resumeSchema = new Schema<IResume>(
           startDate: String,
           endDate: String,
           gpa: String,
+          level: String,
+          board: String,
+          gpaScale: String,
+          passingYear: String,
+        },
+      ],
+      trainings: [
+        {
+          id: String,
+          title: String,
+          institute: String,
+          duration: String,
+          year: String,
+          description: String,
         },
       ],
       projects: [
@@ -339,7 +401,6 @@ const resumeSchema = new Schema<IResume>(
 );
 
 resumeSchema.index({ userId: 1, createdAt: -1 });
-resumeSchema.index({ publicSlug: 1 });
 
 resumeSchema.pre("validate", function (next) {
   this.language = normalizeLanguage(this.language);

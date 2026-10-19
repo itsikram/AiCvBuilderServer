@@ -21,10 +21,11 @@ export const authenticate = async (
     if (!token) throw new ApiError(401, "Authentication required");
 
     const payload = verifyAccessToken(token);
-    const user = await User.findById(payload.userId);
+    const user = await User.findById(payload.userId).select("role email").lean();
     if (!user) throw new ApiError(401, "User not found");
 
-    req.user = { ...payload, id: payload.userId };
+    // Role comes from the database, so promotions and demotions apply immediately
+    req.user = { ...payload, role: user.role, email: user.email, id: payload.userId };
     next();
   } catch {
     next(new ApiError(401, "Invalid or expired token"));

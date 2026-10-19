@@ -301,7 +301,8 @@ export const getCoupons = asyncHandler(async (_req: AuthRequest, res: Response) 
 });
 
 export const updateCoupon = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const coupon = await Coupon.findByIdAndUpdate(req.params.id, req.body, { new: true });
+  const coupon = await Coupon.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+  if (!coupon) throw new ApiError(404, "Coupon not found");
   res.json({ success: true, data: coupon });
 });
 
@@ -316,7 +317,8 @@ export const manageTemplates = asyncHandler(async (req: AuthRequest, res: Respon
 });
 
 export const updateTemplate = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const template = await Template.findByIdAndUpdate(req.params.id, req.body, { new: true });
+  const template = await Template.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+  if (!template) throw new ApiError(404, "Template not found");
   res.json({ success: true, data: template });
 });
 
@@ -340,6 +342,7 @@ export const createBlog = asyncHandler(async (req: AuthRequest, res: Response) =
 export const updateBlog = asyncHandler(async (req: AuthRequest, res: Response) => {
   const payload = await buildBlogPayload(req);
   const blog = await Blog.findByIdAndUpdate(req.params.id, payload, { new: true });
+  if (!blog) throw new ApiError(404, "Blog not found");
   res.json({ success: true, data: blog });
 });
 

@@ -2,6 +2,17 @@ import { Router } from "express";
 import multer from "multer";
 import * as adminController from "../controllers/admin.controller.js";
 import { authenticate, requireAdmin } from "../middleware/auth.middleware.js";
+import { validate } from "../middleware/validate.middleware.js";
+import {
+  adminUpdateUserSchema,
+  createCouponSchema,
+  createTemplateSchema,
+  idParamSchema,
+  updateCouponSchema,
+  updateTemplateSchema,
+} from "../validators/admin.validator.js";
+
+const byId = validate(idParamSchema, "params");
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -24,24 +35,24 @@ router.use(authenticate, requireAdmin);
 
 router.get("/dashboard", adminController.getDashboard);
 router.get("/users", adminController.getUsers);
-router.patch("/users/:id", adminController.updateUser);
-router.patch("/users/:id/subscription", adminController.updateUserSubscription);
-router.delete("/users/:id", adminController.deleteUser);
+router.patch("/users/:id", byId, validate(adminUpdateUserSchema), adminController.updateUser);
+router.patch("/users/:id/subscription", byId, adminController.updateUserSubscription);
+router.delete("/users/:id", byId, adminController.deleteUser);
 router.get("/payments", adminController.getPayments);
 router.get("/bkash/config", adminController.getBkashConfig);
 router.put("/bkash/config", adminController.updateBkashConfig);
 router.get("/bkash/payments", adminController.getBkashPayments);
 router.patch("/bkash/payments/:id", adminController.reviewBkashPayment);
 router.get("/coupons", adminController.getCoupons);
-router.post("/coupons", adminController.createCoupon);
-router.patch("/coupons/:id", adminController.updateCoupon);
+router.post("/coupons", validate(createCouponSchema), adminController.createCoupon);
+router.patch("/coupons/:id", byId, validate(updateCouponSchema), adminController.updateCoupon);
 router.get("/templates", adminController.manageTemplates);
-router.post("/templates", adminController.manageTemplates);
-router.patch("/templates/:id", adminController.updateTemplate);
-router.delete("/templates/:id", adminController.deleteTemplate);
+router.post("/templates", validate(createTemplateSchema), adminController.manageTemplates);
+router.patch("/templates/:id", byId, validate(updateTemplateSchema), adminController.updateTemplate);
+router.delete("/templates/:id", byId, adminController.deleteTemplate);
 router.get("/blogs", adminController.manageBlogs);
 router.post("/blogs", uploadBlogCover, adminController.createBlog);
-router.patch("/blogs/:id", uploadBlogCover, adminController.updateBlog);
+router.patch("/blogs/:id", byId, uploadBlogCover, adminController.updateBlog);
 router.get("/gemini-keys", adminController.getGeminiKeyStatus);
 
 // Page Content Management (CMS)

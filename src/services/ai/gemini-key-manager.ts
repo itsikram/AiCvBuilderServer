@@ -1,160 +1,105 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../../config/index.js";
-import { cacheGet, cacheSet } from "../../config/redis.js";
 
-interface KeyStatus {
-  key: string;
+/**
+ * Rotates between GEMINI_API_KEYS. Keys are read only from the environment and
+ * are never logged or returned by any API: status reports use the key's index.
+ *
+ * - Rate-limited keys (HTTP 429) cool down for a minute.
+ * - Rejected keys (invalid, revoked, reported as leaked, project denied) are
+ *   disabled for 6 hours, so one bad key no longer slows every request.
+ */
+interface KeyState {
   index: number;
-  isLimited: boolean;
-  limitExpireAt?: number;
-  failureCount: number;
+  key: string;
+  cooldownUntil: number;
+  disabledUntil: number;
+  disabledReason?: string;
+  failures: number;
   lastUsedAt: number;
 }
 
+const RATE_LIMIT_COOLDOWN_MS = 60_000;
+const DISABLE_MS = 6 * 60 * 60_000;
+
 class GeminiKeyManager {
-  private keyStatuses: KeyStatus[] = [];
-  private currentKeyIndex: number = 0;
-  private readonly RATE_LIMIT_RESET_MS = 60000; // 1 minute
-  private readonly RATE_LIMIT_CACHE_PREFIX = "gemini_rate_limit:";
-  private readonly MAX_FAILURES_BEFORE_LIMIT = 3;
+  private keys: KeyState[] = config.gemini.apiKeys.map((key, index) => ({
+    index,
+    key,
+    cooldownUntil: 0,
+    disabledUntil: 0,
+    failures: 0,
+    lastUsedAt: 0,
+  }));
 
   constructor() {
-    this.initializeKeys();
+    if (this.keys.length === 0) console.warn("No Gemini API keys configured (set GEMINI_API_KEYS)");
+    else console.log(`Gemini: ${this.keys.length} API key(s) configured`);
   }
 
-  private initializeKeys(): void {
-    const keys = config.gemini.apiKeys || [];
-    if (keys.length === 0) {
-      console.warn("No Gemini API keys configured");
-      return;
-    }
-
-    this.keyStatuses = keys.map((key, index) => ({
-      key,
-      index,
-      isLimited: false,
-      failureCount: 0,
-      lastUsedAt: 0,
-    }));
-
-    console.log(`Initialized ${keys.length} Gemini API key(s)`);
+  get total() {
+    return this.keys.length;
   }
 
-  private async checkKeyStatus(keyIndex: number): Promise<void> {
-    const keyStatus = this.keyStatuses[keyIndex];
-    if (!keyStatus) return;
-
-    const cacheKey = `${this.RATE_LIMIT_CACHE_PREFIX}${keyIndex}`;
-    const cachedLimit = await cacheGet<boolean>(cacheKey);
-
-    if (cachedLimit) {
-      keyStatus.isLimited = true;
-      console.log(`Key ${keyIndex} is rate limited (from cache)`);
-    } else if (keyStatus.isLimited && keyStatus.limitExpireAt && Date.now() >= keyStatus.limitExpireAt) {
-      keyStatus.isLimited = false;
-      keyStatus.failureCount = 0;
-      console.log(`Key ${keyIndex} rate limit expired, resuming`);
-    }
+  private usable(now = Date.now()) {
+    return this.keys.filter((k) => k.disabledUntil <= now && k.cooldownUntil <= now);
   }
 
-  private async markKeyLimited(keyIndex: number): Promise<void> {
-    const keyStatus = this.keyStatuses[keyIndex];
-    if (!keyStatus) return;
-
-    keyStatus.isLimited = true;
-    keyStatus.limitExpireAt = Date.now() + this.RATE_LIMIT_RESET_MS;
-    keyStatus.failureCount = 0;
-
-    const cacheKey = `${this.RATE_LIMIT_CACHE_PREFIX}${keyIndex}`;
-    await cacheSet(cacheKey, true, Math.ceil(this.RATE_LIMIT_RESET_MS / 1000));
-
-    console.warn(
-      `Key ${keyIndex} marked as limited for ${this.RATE_LIMIT_RESET_MS}ms. Switching to next key.`
-    );
+  /** Least-recently-used healthy key, excluding keys already tried for this request. */
+  next(exclude: Set<number> = new Set()): { key: string; index: number } | null {
+    const candidates = this.usable().filter((k) => !exclude.has(k.index));
+    if (candidates.length === 0) return null;
+    const chosen = candidates.reduce((a, b) => (b.lastUsedAt < a.lastUsedAt ? b : a));
+    chosen.lastUsedAt = Date.now();
+    return { key: chosen.key, index: chosen.index };
   }
 
-  private recordFailure(keyIndex: number): void {
-    const keyStatus = this.keyStatuses[keyIndex];
-    if (!keyStatus) return;
-
-    keyStatus.failureCount++;
-    if (keyStatus.failureCount >= this.MAX_FAILURES_BEFORE_LIMIT) {
-      console.warn(
-        `Key ${keyIndex} has ${keyStatus.failureCount} failures, marking as limited`
-      );
-    }
+  /** Milliseconds until some key can be used again (0 if one is ready, Infinity if none ever will). */
+  msUntilAvailable(): number {
+    const now = Date.now();
+    const enabled = this.keys.filter((k) => k.disabledUntil <= now);
+    if (enabled.length === 0) return Number.POSITIVE_INFINITY;
+    return Math.max(0, Math.min(...enabled.map((k) => k.cooldownUntil - now)));
   }
 
-  private getNextAvailableKeyIndex(): number {
-    const availableKeys = this.keyStatuses.filter((ks) => !ks.isLimited);
-
-    if (availableKeys.length === 0) {
-      console.warn("No available API keys, using first key anyway");
-      return 0;
-    }
-
-    // Find the key with oldest lastUsedAt to balance load
-    let nextKey = availableKeys[0];
-    for (const key of availableKeys) {
-      if (key.lastUsedAt < nextKey.lastUsedAt) {
-        nextKey = key;
-      }
-    }
-
-    return nextKey.index;
+  markRateLimited(index: number) {
+    const key = this.keys[index];
+    if (!key) return;
+    key.cooldownUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+    console.warn(`Gemini key #${index} rate limited; cooling down for ${RATE_LIMIT_COOLDOWN_MS / 1000}s`);
   }
 
-  async getNextClient(): Promise<{ client: GoogleGenerativeAI; keyIndex: number }> {
-    // Check status of all keys
-    for (let i = 0; i < this.keyStatuses.length; i++) {
-      await this.checkKeyStatus(i);
-    }
-
-    const keyIndex = this.getNextAvailableKeyIndex();
-    const keyStatus = this.keyStatuses[keyIndex];
-
-    if (!keyStatus || !keyStatus.key) {
-      throw new Error("No Gemini API keys available");
-    }
-
-    keyStatus.lastUsedAt = Date.now();
-    const client = new GoogleGenerativeAI(keyStatus.key);
-
-    return { client, keyIndex };
+  disable(index: number, reason: string) {
+    const key = this.keys[index];
+    if (!key) return;
+    key.disabledUntil = Date.now() + DISABLE_MS;
+    key.disabledReason = reason;
+    console.error(`Gemini key #${index} disabled for 6h: ${reason}. Replace it in GEMINI_API_KEYS.`);
   }
 
-  async handleError(keyIndex: number, error: unknown): Promise<void> {
-    const keyStatus = this.keyStatuses[keyIndex];
-    if (!keyStatus) return;
-
-    const errorStr = String(error);
-    const errorLower = errorStr.toLowerCase();
-
-    // Check for rate limit errors
-    if (
-      errorLower.includes("resource_exhausted") ||
-      errorLower.includes("rate_limit") ||
-      errorLower.includes("quota") ||
-      errorLower.includes("429")
-    ) {
-      await this.markKeyLimited(keyIndex);
-    } else {
-      // Record other failures
-      this.recordFailure(keyIndex);
-    }
+  recordFailure(index: number) {
+    const key = this.keys[index];
+    if (key) key.failures += 1;
   }
 
-  getKeyStats(): Array<{ index: number; isLimited: boolean; failureCount: number; lastUsedAt: number }> {
-    return this.keyStatuses.map((ks) => ({
-      index: ks.index,
-      isLimited: ks.isLimited,
-      failureCount: ks.failureCount,
-      lastUsedAt: ks.lastUsedAt,
+  recordSuccess(index: number) {
+    const key = this.keys[index];
+    if (key) key.failures = 0;
+  }
+
+  getKeyStats() {
+    const now = Date.now();
+    return this.keys.map((k) => ({
+      index: k.index,
+      status: k.disabledUntil > now ? "disabled" : k.cooldownUntil > now ? "rate_limited" : "active",
+      disabledReason: k.disabledUntil > now ? k.disabledReason : undefined,
+      isLimited: k.disabledUntil > now || k.cooldownUntil > now,
+      failureCount: k.failures,
+      lastUsedAt: k.lastUsedAt,
     }));
   }
 
-  getAvailableKeyCount(): number {
-    return this.keyStatuses.filter((ks) => !ks.isLimited).length;
+  getAvailableKeyCount() {
+    return this.usable().length;
   }
 }
 

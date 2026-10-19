@@ -19,9 +19,14 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GEMINI_API_KEY: z.string().optional().default(""),
   GEMINI_API_KEYS: z.string().optional().default(""),
-  GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
+  GEMINI_MODEL: z.string().default("gemini-3.5-flash-lite"),
+  GEMINI_FALLBACK_MODEL: z.string().optional(),
+  GEMINI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).optional(),
+  GEMINI_MAX_RETRIES: z.coerce.number().int().min(0).max(6).optional(),
+  AI_DAILY_QUOTA_FREE: z.coerce.number().int().min(0).optional(),
+  AI_DAILY_QUOTA_PREMIUM: z.coerce.number().int().min(0).optional(),
   PDFTXT_API_KEY: z.string().optional().default(""),
-  REDIS_URL: z.string().default("redis://localhost:6379"),
+  REDIS_URL: z.string().optional(),
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
@@ -105,13 +110,16 @@ export const config = {
       .split(",")
       .map(key => key.trim())
       .filter(key => key.length > 0),
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
+    fallbackModel: process.env.GEMINI_FALLBACK_MODEL || "",
+    timeoutMs: Number(process.env.GEMINI_TIMEOUT_MS) || 30_000,
+    maxRetries: process.env.GEMINI_MAX_RETRIES !== undefined ? Number(process.env.GEMINI_MAX_RETRIES) : 3,
   },
   pdftxt: {
     apiKey: process.env.PDFTXT_API_KEY || "",
   },
   redis: {
-    url: process.env.REDIS_URL || "redis://localhost:6379",
+    url: process.env.REDIS_URL || "",
   },
   cloudinary: {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
@@ -133,6 +141,10 @@ export const config = {
     failUrl: process.env.SSL_FAIL_URL || "",
     cancelUrl: process.env.SSL_CANCEL_URL || "",
     ipnUrl: process.env.SSL_IPN_URL || "",
+  },
+  ai: {
+    dailyQuotaFree: process.env.AI_DAILY_QUOTA_FREE !== undefined ? Number(process.env.AI_DAILY_QUOTA_FREE) : 10,
+    dailyQuotaPremium: process.env.AI_DAILY_QUOTA_PREMIUM !== undefined ? Number(process.env.AI_DAILY_QUOTA_PREMIUM) : 100,
   },
   app: {
     name: process.env.APP_NAME || "AI CV Builder BD",

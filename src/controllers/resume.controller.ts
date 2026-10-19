@@ -1,5 +1,7 @@
 import { Response } from "express";
 import fs from "fs";
+import { createHash } from "crypto";
+import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
 import { IResumeContent, Resume } from "../models/Resume.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -8,7 +10,8 @@ import { AuthRequest } from "../middleware/auth.middleware.js";
 import { generateUniqueSlug } from "../utils/slug.js";
 import { normalizeLanguage } from "../utils/language.js";
 import { config } from "../config/index.js";
-import { geminiService } from "../services/ai/gemini.service.js";
+import { geminiService, type ParsedCv } from "../services/ai/gemini.service.js";
+import { cvToText } from "../services/ai/cvText.js";
 import {
   checkResumeLimit,
   checkAiLimit,
@@ -21,169 +24,53 @@ import { Template } from "../models/Template.js";
 import { generateResumePDF } from "../services/pdf.service.js";
 import { trackEvent } from "../services/analytics.service.js";
 import { cacheGet, cacheSet } from "../config/redis.js";
-import { extractPdfText } from "../services/pdf-extraction.service.js";
+import { extractCvText } from "../services/pdf-extraction.service.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
+import { updateResumeSchema, type ResumeContentInput } from "../validators/resume.validator.js";
 
-type ParsedResumeContent = Omit<
-  IResumeContent,
-  | "experience"
-  | "education"
-  | "projects"
-  | "languages"
-  | "certifications"
-  | "awards"
-  | "publications"
-  | "volunteerExperience"
-  | "references"
-  | "courses"
-  | "memberships"
-> & {
-  experience?: Array<Omit<IResumeContent["experience"][number], "id">>;
-  education?: Array<Omit<IResumeContent["education"][number], "id">>;
-  projects?: Array<Omit<IResumeContent["projects"][number], "id">>;
-  languages?: Array<Omit<IResumeContent["languages"][number], "id">>;
-  certifications?: Array<Omit<IResumeContent["certifications"][number], "id">>;
-  awards?: Array<Omit<IResumeContent["awards"][number], "id">>;
-  publications?: Array<Omit<IResumeContent["publications"][number], "id">>;
-  volunteerExperience?: Array<Omit<IResumeContent["volunteerExperience"][number], "id">>;
-  references?: Array<Omit<IResumeContent["references"][number], "id">>;
-  courses?: Array<Omit<IResumeContent["courses"][number], "id">>;
-  memberships?: Array<Omit<IResumeContent["memberships"][number], "id">>;
-};
+type UpdateResumeInput = z.infer<typeof updateResumeSchema>;
 
-const hasTextValue = (value: unknown): boolean => {
-  if (Array.isArray(value)) return value.some(hasTextValue);
-  if (typeof value === "object" && value !== null) {
-    return Object.entries(value)
-      .filter(([key]) => key !== "id" && key !== "current")
-      .some(([, nested]) => hasTextValue(nested));
-  }
-  if (typeof value === "boolean") return value;
+const hasText = (value: unknown): boolean => {
+  if (Array.isArray(value)) return value.some(hasText);
+  if (typeof value === "object" && value !== null) return Object.values(value).some(hasText);
   return String(value ?? "").trim().length > 0;
 };
 
-const withIds = <T extends Record<string, unknown>>(items: T[] | undefined) =>
-  (items || [])
-    .filter(hasTextValue)
-    .map((item) => ({ id: uuidv4(), ...item }));
+/** Gives AI-parsed entries ids and drops empty placeholder items. */
+const withIds = <T extends object>(items: T[]) => items.filter(hasText).map((item) => ({ ...item, id: uuidv4() }));
 
-const normalizeParsedResumeContent = (parsed: ParsedResumeContent): IResumeContent => ({
-  personalInfo: {
-    fullName: parsed.personalInfo?.fullName || "",
-    email: parsed.personalInfo?.email || "",
-    phone: parsed.personalInfo?.phone || "",
-    location: parsed.personalInfo?.location || "",
-    linkedin: parsed.personalInfo?.linkedin || "",
-    portfolio: parsed.personalInfo?.portfolio || "",
-    github: parsed.personalInfo?.github || "",
-    website: parsed.personalInfo?.website || "",
-    summary: parsed.personalInfo?.summary || "",
-    profilePhoto: parsed.personalInfo?.profilePhoto || "",
-    profilePhotoSize: parsed.personalInfo?.profilePhotoSize === "small" || parsed.personalInfo?.profilePhotoSize === "large"
-      ? parsed.personalInfo.profilePhotoSize
-      : "medium",
-    profilePhotoAlignment: parsed.personalInfo?.profilePhotoAlignment === "left" || parsed.personalInfo?.profilePhotoAlignment === "right"
-      ? parsed.personalInfo.profilePhotoAlignment
-      : "center",
-  },
-  experience: withIds(parsed.experience).map((exp) => ({
-    company: String(exp.company || ""),
-    position: String(exp.position || ""),
-    location: String(exp.location || ""),
-    startDate: String(exp.startDate || ""),
-    endDate: String(exp.endDate || ""),
-    current: Boolean(exp.current),
-    bullets: Array.isArray(exp.bullets) ? exp.bullets.filter(Boolean).map(String) : [],
-    id: exp.id,
-  })),
-  education: withIds(parsed.education).map((edu) => ({
-    institution: String(edu.institution || ""),
-    degree: String(edu.degree || ""),
-    field: String(edu.field || ""),
-    startDate: String(edu.startDate || ""),
-    endDate: String(edu.endDate || ""),
-    gpa: String(edu.gpa || ""),
-    id: edu.id,
-  })),
-  projects: withIds(parsed.projects).map((project) => ({
-    name: String(project.name || ""),
-    description: String(project.description || ""),
-    url: String(project.url || ""),
-    technologies: Array.isArray(project.technologies)
-      ? project.technologies.filter(Boolean).map(String)
-      : [],
-    id: project.id,
-  })),
-  skills: Array.isArray(parsed.skills) ? parsed.skills.filter(Boolean).map(String) : [],
-  languages: withIds(parsed.languages).map((language) => ({
-    name: String(language.name || ""),
-    proficiency: ["native", "fluent", "intermediate", "basic"].includes(String(language.proficiency))
-      ? language.proficiency
-      : "intermediate",
-    id: language.id,
-  })),
-  certifications: withIds(parsed.certifications).map((cert) => ({
-    name: String(cert.name || ""),
-    issuer: String(cert.issuer || ""),
-    date: String(cert.date || ""),
-    credentialId: String(cert.credentialId || ""),
-    credentialUrl: String(cert.credentialUrl || ""),
-    id: cert.id,
-  })),
-  awards: withIds(parsed.awards).map((award) => ({
-    title: String(award.title || ""),
-    issuer: String(award.issuer || ""),
-    date: String(award.date || ""),
-    description: String(award.description || ""),
-    id: award.id,
-  })),
-  publications: withIds(parsed.publications).map((publication) => ({
-    title: String(publication.title || ""),
-    publisher: String(publication.publisher || ""),
-    date: String(publication.date || ""),
-    url: String(publication.url || ""),
-    description: String(publication.description || ""),
-    id: publication.id,
-  })),
-  volunteerExperience: withIds(parsed.volunteerExperience).map((volunteer) => ({
-    organization: String(volunteer.organization || ""),
-    role: String(volunteer.role || ""),
-    startDate: String(volunteer.startDate || ""),
-    endDate: String(volunteer.endDate || ""),
-    current: Boolean(volunteer.current),
-    description: String(volunteer.description || ""),
-    id: volunteer.id,
-  })),
-  references: withIds(parsed.references).map((reference) => ({
-    name: String(reference.name || ""),
-    position: String(reference.position || ""),
-    company: String(reference.company || ""),
-    email: String(reference.email || ""),
-    phone: String(reference.phone || ""),
-    relationship: String(reference.relationship || ""),
-    id: reference.id,
-  })),
-  interests: Array.isArray(parsed.interests) ? parsed.interests.filter(Boolean).map(String) : [],
-  courses: withIds(parsed.courses).map((course) => ({
-    name: String(course.name || ""),
-    provider: String(course.provider || ""),
-    date: String(course.date || ""),
-    certificateUrl: String(course.certificateUrl || ""),
-    id: course.id,
-  })),
-  memberships: withIds(parsed.memberships).map((membership) => ({
-    organization: String(membership.organization || ""),
-    role: String(membership.role || ""),
-    startDate: String(membership.startDate || ""),
-    endDate: String(membership.endDate || ""),
-    current: Boolean(membership.current),
-    id: membership.id,
-  })),
-  customSections: (parsed.customSections || []).filter(hasTextValue).map((section) => ({
-    title: section.title || "",
-    content: section.content || "",
-  })),
-});
+const normalizeParsedResumeContent = (parsed: ParsedCv): IResumeContent => {
+  const details = parsed.personalDetails;
+  return {
+    personalInfo: {
+      ...parsed.personalInfo,
+      profilePhoto: "",
+      profilePhotoSize: "medium",
+      profilePhotoAlignment: "center",
+    },
+    careerObjective: parsed.careerObjective,
+    personalDetails: hasText(details) ? details : undefined,
+    experience: withIds(parsed.experience).map((exp) => ({
+      ...exp,
+      current: exp.current === "yes",
+      bullets: exp.bullets.filter(Boolean),
+    })),
+    education: withIds(parsed.education).map((edu) => ({ ...edu, startDate: "", endDate: edu.passingYear })),
+    trainings: withIds(parsed.trainings),
+    projects: withIds(parsed.projects),
+    skills: parsed.skills.filter(Boolean),
+    languages: withIds(parsed.languages),
+    certifications: withIds(parsed.certifications).map((c) => ({ ...c, credentialId: "", credentialUrl: "" })),
+    awards: withIds(parsed.awards),
+    publications: [],
+    volunteerExperience: [],
+    references: withIds(parsed.references),
+    interests: parsed.interests.filter(Boolean),
+    courses: [],
+    memberships: [],
+    customSections: [],
+  };
+};
 
 const resolveTemplateForUser = async (templateId: string, user: IUser) => {
   const template = await Template.findOne({ slug: templateId, isActive: true });
@@ -264,9 +151,16 @@ export const createResume = asyncHandler(async (req: AuthRequest, res: Response)
 });
 
 export const updateResume = asyncHandler(async (req: AuthRequest, res: Response) => {
+  // Only whitelisted, validated fields reach the database (validate() replaced req.body)
+  const update = { ...(req.body as UpdateResumeInput) };
+  if (update.templateId) {
+    const user = await User.findById(req.user!.userId);
+    if (!user) throw new ApiError(404, "User not found");
+    update.templateId = (await resolveTemplateForUser(update.templateId, user)).slug;
+  }
   const resume = await Resume.findOneAndUpdate(
     { _id: req.params.id, userId: req.user!.userId },
-    { $set: req.body },
+    { $set: update },
     { new: true, runValidators: true }
   );
   if (!resume) throw new ApiError(404, "Resume not found");
@@ -305,25 +199,11 @@ export const generateWithAI = asyncHandler(async (req: AuthRequest, res: Respons
   await checkAiLimit(user);
 
   const language = normalizeLanguage(req.body.language || user.language);
-  const result = await geminiService.generateResume({
-    ...req.body,
-    language,
-  });
+  const result = await geminiService.generateResume({ ...req.body, language });
   await incrementAiUsage(user);
   await trackEvent("aiRequests");
 
-  if (req.body.resumeId) {
-    const resume = await Resume.findOne({
-      _id: req.body.resumeId,
-      userId: user._id,
-    });
-    if (resume) {
-      resume.content.personalInfo.summary = result.summary;
-      resume.content.skills = result.skills;
-      await resume.save();
-    }
-  }
-
+  // The client applies suggestions it receives; nothing is written to the CV here.
   res.json({ success: true, data: result });
 });
 
@@ -333,47 +213,19 @@ export const tailorResumeWithAI = asyncHandler(async (req: AuthRequest, res: Res
   await checkAiLimit(user);
 
   const resumeId = req.body.resumeId as string | undefined;
-  const baseContent = req.body.content
-    ? JSON.stringify(req.body.content)
-    : undefined;
+  const resume = resumeId ? await Resume.findOne({ _id: resumeId, userId: user._id }) : null;
+  if (resumeId && !resume) throw new ApiError(404, "Resume not found");
 
-  const resume = resumeId
-    ? await Resume.findOne({ _id: resumeId, userId: user._id })
-    : null;
+  const cvText = cvToText(req.body.content ?? resume?.content);
+  if (!cvText.trim()) throw new ApiError(400, "Add some CV content before tailoring it to a job.");
 
-  if (!resume && !baseContent) {
-    throw new ApiError(404, "Resume not found");
-  }
-
-  const currentResumeText = baseContent || JSON.stringify(resume?.content ?? {});
   const language = normalizeLanguage(req.body.language || user.language);
-  const result = await geminiService.tailorResume(
-    currentResumeText,
-    req.body.jobDescription,
-    language
-  );
-
-  if (resume) {
-    resume.content.personalInfo.summary = result.summary || resume.content.personalInfo.summary;
-    resume.content.skills = result.skills?.length ? result.skills : resume.content.skills;
-
-    if (result.experienceBullets?.length) {
-      resume.content.experience = resume.content.experience.map((experience, index) => {
-        const tailored = result.experienceBullets[index];
-        if (tailored?.bullets?.length) {
-          return { ...experience, bullets: tailored.bullets };
-        }
-        return experience;
-      });
-    }
-
-    resume.atsFeedback = result.suggestions || resume.atsFeedback;
-    await resume.save();
-  }
+  const result = await geminiService.tailorResume(cvText, req.body.jobDescription, language);
 
   await incrementAiUsage(user);
   await trackEvent("aiRequests");
 
+  // Suggestions are returned for the user to approve; the saved CV is not changed.
   res.json({ success: true, data: result });
 });
 
@@ -393,10 +245,11 @@ export const improveWithAI = asyncHandler(async (req: AuthRequest, res: Response
   await trackEvent("aiRequests");
 
   if (req.body.resumeId) {
-    await Resume.findByIdAndUpdate(req.body.resumeId, {
-      atsScore: result.atsScore,
-      atsFeedback: result.suggestions,
-    });
+    // Scoped to the caller: users can only annotate their own CVs
+    await Resume.updateOne(
+      { _id: req.body.resumeId, userId: user._id },
+      { atsScore: result.atsScore, atsFeedback: result.suggestions }
+    );
   }
 
   res.json({ success: true, data: result });
@@ -409,7 +262,8 @@ export const checkATS = asyncHandler(async (req: AuthRequest, res: Response) => 
   await checkAiLimit(user);
 
   const language = normalizeLanguage(req.body.language || user.language);
-  const cacheKey = `ats:${Buffer.from(req.body.resumeText).toString("base64").slice(0, 50)}`;
+  // Hash of the full input, so different CVs never share a cached report
+  const cacheKey = `ats:${createHash("sha256").update(JSON.stringify([req.body.resumeText, req.body.jobDescription ?? "", language])).digest("hex")}`;
   const cached = await cacheGet<unknown>(cacheKey);
   if (cached) {
     res.json({ success: true, data: cached, cached: true });
@@ -532,70 +386,67 @@ export const reorderSections = asyncHandler(async (req: AuthRequest, res: Respon
 export const addExperience = asyncHandler(async (req: AuthRequest, res: Response) => {
   const resume = await Resume.findOne({ _id: req.params.id, userId: req.user!.userId });
   if (!resume) throw new ApiError(404, "Resume not found");
-  resume.content.experience.push({ id: uuidv4(), ...req.body, bullets: req.body.bullets || [] });
+  const exp = req.body as ResumeContentInput["experience"][number];
+  resume.content.experience.push({ ...exp, id: uuidv4(), bullets: exp.bullets || [] });
   await resume.save();
   res.json({ success: true, data: resume });
 });
 
 export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: Response) => {
-  if (!req.file) {
-    throw new ApiError(400, "No file uploaded");
-  }
+  if (!req.file) throw new ApiError(400, "No file uploaded");
 
-  const cloudinaryFile = await uploadBuffer(req.file.buffer, "aicvbuilderbd/resumes", "raw", {
+  const user = await User.findById(req.user!.userId);
+  if (!user) throw new ApiError(404, "User not found");
+  await checkAiLimit(user);
+
+  const resumeText = await extractCvText(req.file.buffer, req.file.originalname, req.file.mimetype);
+  const parsedContent = normalizeParsedResumeContent(await geminiService.parseResume(resumeText));
+  await incrementAiUsage(user);
+
+  // Keeping the original file is optional: it needs Cloudinary
+  const stored = await uploadBuffer(req.file.buffer, "aicvbuilderbd/resumes", "raw", {
     resource_type: "raw",
     use_filename: true,
     unique_filename: true,
     filename_override: req.file.originalname,
+  }).catch((error: Error) => {
+    console.warn("Storing uploaded CV failed:", error.message);
+    return null;
   });
 
-  if (!cloudinaryFile) {
-    throw new ApiError(500, "Cloudinary is not configured");
-  }
-
-  const resumeText = await extractPdfText(req.file.buffer, req.file.originalname);
-
-  const user = await User.findById(req.user!.userId);
-  if (!user) throw new ApiError(404, "User not found");
+  const uploadFields = {
+    uploadedResumeText: resumeText,
+    uploadedFileName: req.file.originalname,
+    uploadedFilePath: stored?.publicId ?? null,
+    uploadedFileUrl: stored?.url ?? null,
+    uploadedFileMimeType: req.file.mimetype,
+    uploadedFileSize: req.file.size,
+    uploadedAt: new Date(),
+  };
 
   const resumeId = req.body.resumeId as string | undefined;
-  const parsedContent = normalizeParsedResumeContent(await geminiService.parseResume(resumeText));
-
   let resume;
-
   if (resumeId) {
+    if (!/^[a-fd]{24}$/i.test(resumeId)) throw new ApiError(400, "Invalid id");
     resume = await Resume.findOneAndUpdate(
       { _id: resumeId, userId: user._id },
-      {
-        content: parsedContent,
-        uploadedResumeText: resumeText,
-        uploadedFileName: req.file.originalname,
-        uploadedFilePath: cloudinaryFile.publicId,
-        uploadedFileUrl: cloudinaryFile.url,
-        uploadedFileMimeType: req.file.mimetype,
-        uploadedFileSize: req.file.size,
-        uploadedAt: new Date(),
-      },
+      { content: parsedContent, ...uploadFields },
       { new: true }
     );
     if (!resume) throw new ApiError(404, "Resume not found");
   } else {
-    const titleFromFile = req.file.originalname.replace(".pdf", "").slice(0, 50);
+    const count = await Resume.countDocuments({ userId: user._id });
+    await checkResumeLimit(user, count);
+    const titleFromFile = req.file.originalname.replace(/.(pdf|docx)$/i, "").slice(0, 50) || "Imported CV";
     resume = await Resume.create({
       userId: user._id,
-      title: titleFromFile || "Uploaded Resume",
-      slug: generateUniqueSlug(titleFromFile || "Uploaded Resume"),
+      title: titleFromFile,
+      slug: generateUniqueSlug(titleFromFile),
       templateId: "modern-ats",
       format: "ats",
       language: normalizeLanguage(user.language || "en"),
       content: parsedContent,
-      uploadedResumeText: resumeText,
-      uploadedFileName: req.file.originalname,
-      uploadedFilePath: cloudinaryFile.publicId,
-      uploadedFileUrl: cloudinaryFile.url,
-      uploadedFileMimeType: req.file.mimetype,
-      uploadedFileSize: req.file.size,
-      uploadedAt: new Date(),
+      ...uploadFields,
     });
     user.usage.resumesCreated += 1;
     await user.save();

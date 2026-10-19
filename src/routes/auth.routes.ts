@@ -8,9 +8,10 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyEmailSchema,
+  updateProfileSchema,
 } from "../validators/auth.validator.js";
 import { authenticate } from "../middleware/auth.middleware.js";
-import { authLimiter } from "../middleware/rateLimit.middleware.js";
+import { authLimiter, refreshLimiter } from "../middleware/rateLimit.middleware.js";
 import multer from "multer";
 
 const profileUpload = multer({
@@ -30,12 +31,12 @@ const router = Router();
 router.post("/register", authLimiter, profileUpload.single("profilePicture"), validate(registerSchema), authController.register);
 router.post("/login", authLimiter, validate(loginSchema), authController.login);
 router.post("/google", authLimiter, validate(googleAuthSchema), authController.googleLogin);
-router.post("/refresh", authController.refreshToken);
+router.post("/refresh", refreshLimiter, authController.refreshToken);
 router.post("/logout", authController.logout);
-router.post("/verify-email", validate(verifyEmailSchema), authController.verifyEmail);
+router.post("/verify-email", authLimiter, validate(verifyEmailSchema), authController.verifyEmail);
 router.post("/forgot-password", authLimiter, validate(forgotPasswordSchema), authController.forgotPassword);
-router.post("/reset-password", validate(resetPasswordSchema), authController.resetPassword);
+router.post("/reset-password", authLimiter, validate(resetPasswordSchema), authController.resetPassword);
 router.get("/me", authenticate, authController.getMe);
-router.patch("/profile", authenticate, profileUpload.single("profilePicture"), authController.updateProfile);
+router.patch("/profile", authenticate, profileUpload.single("profilePicture"), validate(updateProfileSchema), authController.updateProfile);
 
 export default router;

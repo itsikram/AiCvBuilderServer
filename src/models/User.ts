@@ -91,7 +91,6 @@ userSchema.methods.comparePassword = async function (candidate: string): Promise
   return bcrypt.compare(candidate, this.password);
 };
 
-userSchema.index({ email: 1 });
-userSchema.index({ referralCode: 1 });
+// email and referralCode are indexed through their unique: true options
 
 export const User = mongoose.model<IUser>("User", userSchema);

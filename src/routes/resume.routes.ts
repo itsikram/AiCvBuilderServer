@@ -9,9 +9,14 @@ import {
   tailorResumeSchema,
   improveResumeSchema,
   atsCheckSchema,
+  resumeIdParamSchema,
+  updateTemplateSchema,
+  reorderSectionsSchema,
+  experienceItemSchema,
 } from "../validators/resume.validator.js";
 import { aiLimiter } from "../middleware/rateLimit.middleware.js";
 import multer from "multer";
+import { SUPPORTED_CV_MIME_TYPES } from "../services/pdf-extraction.service.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -19,8 +24,8 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024,
   },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype !== "application/pdf") {
-      cb(new Error("Only PDF resume uploads are supported"));
+    if (!(SUPPORTED_CV_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+      cb(new Error("Only PDF or Word (.docx) files are supported"));
       return;
     }
     cb(null, true);
@@ -40,17 +45,18 @@ router.post("/ai/generate", aiLimiter, validate(generateResumeSchema), resumeCon
 router.post("/ai/tailor", aiLimiter, validate(tailorResumeSchema), resumeController.tailorResumeWithAI);
 router.post("/ai/improve", aiLimiter, validate(improveResumeSchema), resumeController.improveWithAI);
 router.post("/ai/ats-check", aiLimiter, validate(atsCheckSchema), resumeController.checkATS);
-router.post("/upload-parse", upload.single("file"), resumeController.uploadAndParseResume);
+router.post("/upload-parse", aiLimiter, upload.single("file"), resumeController.uploadAndParseResume);
 
+router.use("/:id", validate(resumeIdParamSchema, "params"));
 router.get("/:id", resumeController.getResume);
 router.get("/:id/uploaded-file", resumeController.downloadUploadedResume);
-router.patch("/:id/template", resumeController.updateTemplate);
+router.patch("/:id/template", validate(updateTemplateSchema), resumeController.updateTemplate);
 router.patch("/:id", validate(updateResumeSchema), resumeController.updateResume);
 router.delete("/:id", resumeController.deleteResume);
 router.post("/:id/duplicate", resumeController.duplicateResume);
 router.post("/:id/toggle-public", resumeController.togglePublic);
 router.get("/:id/export-pdf", resumeController.exportPDF);
-router.patch("/:id/sections", resumeController.reorderSections);
-router.post("/:id/experience", resumeController.addExperience);
+router.patch("/:id/sections", validate(reorderSectionsSchema), resumeController.reorderSections);
+router.post("/:id/experience", validate(experienceItemSchema), resumeController.addExperience);
 
 export default router;
