@@ -87,7 +87,7 @@ export const initiateSSLCommerzPayment = async (
     cancel_url: config.sslcommerz.cancelUrl,
     ipn_url: config.sslcommerz.ipnUrl,
     shipping_method: "NO",
-    product_name: `ChakriCV Premium (${billingCycle})`,
+    product_name: `AI CV Builder BD Premium (${billingCycle})`,
     product_category: "Subscription",
     product_profile: "non-physical-goods",
     cus_name: user.name,

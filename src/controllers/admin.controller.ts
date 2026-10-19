@@ -43,7 +43,7 @@ const getBoolean = (value: unknown): boolean => value === true || value === "tru
 const uploadBlogCoverImage = async (file?: Express.Multer.File) => {
   if (!file) return undefined;
 
-  const uploaded = await uploadBuffer(file.buffer, "chakricv/blogs", "image", {
+  const uploaded = await uploadBuffer(file.buffer, "aicvbuilderbd/blogs", "image", {
     resource_type: "image",
     use_filename: true,
     unique_filename: true,

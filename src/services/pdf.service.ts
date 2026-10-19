@@ -1662,7 +1662,7 @@ export const generateResumePDF = async (
     if (options.watermark) {
       doc.save();
       doc.rotate(-45, { origin: [300, 400] });
-      doc.fontSize(60).fillColor("#cccccc", 0.3).text("ChakriCV Free", 100, 400, { align: "center" });
+      doc.fontSize(60).fillColor("#cccccc", 0.3).text("AI CV Builder BD Free", 100, 400, { align: "center" });
       doc.restore();
     }
 

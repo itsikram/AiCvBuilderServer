@@ -20,7 +20,7 @@ router.use("/page-content", pageContentRoutes);
 router.use("/admin", adminRoutes);
 
 router.get("/health", (_req, res) => {
-  res.json({ success: true, message: "ChakriCV API is running", version: "1.0.0" });
+  res.json({ success: true, message: "AI CV Builder BD API is running", version: "1.0.0" });
 });
 
 export default router;

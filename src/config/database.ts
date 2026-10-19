@@ -1,5 +1,11 @@
+import dns from "dns";
 import mongoose from "mongoose";
 import { config } from "./index.js";
+
+// Some local routers can't answer SRV lookups needed by mongodb+srv:// URIs
+if (process.env.DNS_SERVERS) {
+  dns.setServers(process.env.DNS_SERVERS.split(",").map((s) => s.trim()));
+}
 
 let memoryServer: { stop: () => Promise<boolean>; getUri: () => string } | null = null;
 

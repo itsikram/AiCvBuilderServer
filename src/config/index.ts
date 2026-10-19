@@ -6,7 +6,10 @@ dotenv.config();
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.coerce.number().default(5000),
-  CLIENT_URL: z.string().url(),
+  CLIENT_URL: z.string().url().optional(),
+  SITE_URL: z.string().url().optional(),
+  ALLOWED_ORIGINS: z.string().optional(),
+  COOKIE_DOMAIN: z.string().optional(),
   MONGODB_URI: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default("7d"),
@@ -26,7 +29,7 @@ const envSchema = z.object({
   SMTP_PORT: z.coerce.number().optional(),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
-  EMAIL_FROM: z.string().default("ChakriCV <noreply@chakricv.com>"),
+  EMAIL_FROM: z.string().default("AI CV Builder BD <noreply@aicvbuilderbd.online>"),
   SSL_STORE_ID: z.string().optional(),
   SSL_STORE_PASS: z.string().optional(),
   SSL_IS_LIVE: z
@@ -37,8 +40,7 @@ const envSchema = z.object({
   SSL_FAIL_URL: z.string().optional(),
   SSL_CANCEL_URL: z.string().optional(),
   SSL_IPN_URL: z.string().optional(),
-  APP_NAME: z.string().default("ChakriCV"),
-  APP_URL: z.string().url().default("http://localhost:5173"),
+  APP_NAME: z.string().default("AI CV Builder BD"),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -50,11 +52,43 @@ if (!parsed.success) {
   }
 }
 
+const stripSlash = (url: string) => url.replace(/\/+$/, "");
+
+// Canonical public origin, e.g. https://aicvbuilderbd.online (no trailing slash)
+const siteUrl = stripSlash(process.env.SITE_URL || process.env.CLIENT_URL || "http://localhost:5173");
+
+// The apex and www variants of SITE_URL are always allowed, plus CLIENT_URL and ALLOWED_ORIGINS
+const buildAllowedOrigins = (): string[] => {
+  const origins = new Set<string>();
+  const add = (value?: string) => {
+    if (!value) return;
+    try {
+      const url = new URL(value);
+      origins.add(url.origin);
+      const host = url.hostname;
+      if (host !== "localhost" && !/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+        const twin = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
+        origins.add(`${url.protocol}//${twin}${url.port ? `:${url.port}` : ""}`);
+      }
+    } catch {
+      /* ignore invalid origins */
+    }
+  };
+  add(siteUrl);
+  add(process.env.CLIENT_URL);
+  (process.env.ALLOWED_ORIGINS || "").split(",").map((o) => o.trim()).forEach(add);
+  return [...origins];
+};
+
 export const config = {
   env: (process.env.NODE_ENV as "development" | "production" | "test") || "development",
   port: Number(process.env.PORT) || 5000,
-  clientUrl: process.env.CLIENT_URL || "http://localhost:5173",
-  mongodbUri: process.env.MONGODB_URI || "mongodb://localhost:27017/chakricv",
+  // Where emails and redirects send users; defaults to the canonical site
+  clientUrl: stripSlash(process.env.CLIENT_URL || siteUrl),
+  siteUrl,
+  allowedOrigins: buildAllowedOrigins(),
+  cookieDomain: process.env.COOKIE_DOMAIN || undefined,
+  mongodbUri: process.env.MONGODB_URI || "mongodb://localhost:27017/aicvbuilderbd",
   jwt: {
     secret: process.env.JWT_SECRET || "dev-secret-change-me-in-production-32chars",
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
@@ -89,7 +123,7 @@ export const config = {
     port: Number(process.env.SMTP_PORT) || 587,
     user: process.env.SMTP_USER || "",
     pass: process.env.SMTP_PASS || "",
-    from: process.env.EMAIL_FROM || "ChakriCV <noreply@chakricv.com>",
+    from: process.env.EMAIL_FROM || "AI CV Builder BD <noreply@aicvbuilderbd.online>",
   },
   sslcommerz: {
     storeId: process.env.SSL_STORE_ID || "",
@@ -101,7 +135,7 @@ export const config = {
     ipnUrl: process.env.SSL_IPN_URL || "",
   },
   app: {
-    name: process.env.APP_NAME || "ChakriCV",
-    url: process.env.APP_URL || "http://localhost:5173",
+    name: process.env.APP_NAME || "AI CV Builder BD",
+    url: siteUrl,
   },
 };

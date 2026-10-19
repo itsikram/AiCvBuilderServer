@@ -23,7 +23,8 @@ app.set("trust proxy", 1);
 app.use(helmet());
 app.use(
   cors({
-    origin: config.clientUrl,
+    // Same-origin requests send no Origin header; cross-origin ones must be allow-listed
+    origin: (origin, callback) => callback(null, !origin || config.allowedOrigins.includes(origin)),
     credentials: true,
   })
 );

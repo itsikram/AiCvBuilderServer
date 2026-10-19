@@ -29,6 +29,7 @@ const sendTokens = (res: Response, user: InstanceType<typeof User>) => {
     httpOnly: true,
     secure: config.env === "production",
     sameSite: "lax",
+    domain: config.cookieDomain,
     maxAge: 30 * 24 * 60 * 60 * 1000,
   });
 
@@ -55,7 +56,7 @@ const sendTokens = (res: Response, user: InstanceType<typeof User>) => {
 const uploadProfilePicture = async (file?: Express.Multer.File) => {
   if (!file) return undefined;
 
-  const uploaded = await uploadBuffer(file.buffer, "chakricv/profile-pictures", "image", {
+  const uploaded = await uploadBuffer(file.buffer, "aicvbuilderbd/profile-pictures", "image", {
     transformation: [{ width: 800, height: 800, crop: "limit" }],
   });
 
@@ -166,7 +167,7 @@ export const refreshToken = asyncHandler(async (req: AuthRequest, res: Response)
 });
 
 export const logout = asyncHandler(async (_req: AuthRequest, res: Response) => {
-  res.clearCookie("refreshToken");
+  res.clearCookie("refreshToken", { domain: config.cookieDomain });
   res.json({ success: true, message: "Logged out" });
 });
 

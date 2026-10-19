@@ -54,7 +54,7 @@ const uploadBufferToCloudinary = async (
 
 export const uploadImage = async (
   filePath: string,
-  folder = "chakricv"
+  folder = "aicvbuilderbd"
 ): Promise<{ url: string; publicId: string } | null> => {
   if (!configured) return null;
   const result = await cloudinary.uploader.upload(filePath, { folder, resource_type: "image" });
@@ -63,7 +63,7 @@ export const uploadImage = async (
 
 export const uploadBuffer = async (
   buffer: Buffer,
-  folder = "chakricv",
+  folder = "aicvbuilderbd",
   resourceType: "image" | "raw" | "video" = "image",
   options: UploadApiOptions = {}
 ): Promise<{ url: string; publicId: string } | null> => {

@@ -7,6 +7,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 import { generateUniqueSlug } from "../utils/slug.js";
 import { normalizeLanguage } from "../utils/language.js";
+import { config } from "../config/index.js";
 import { geminiService } from "../services/ai/gemini.service.js";
 import {
   checkResumeLimit,
@@ -468,7 +469,7 @@ export const togglePublic = asyncHandler(async (req: AuthRequest, res: Response)
     data: {
       isPublic: resume.isPublic,
       publicUrl: resume.isPublic
-        ? `${process.env.CLIENT_URL}/r/${resume.publicSlug}`
+        ? `${config.siteUrl}/r/${resume.publicSlug}`
         : null,
     },
   });
@@ -541,7 +542,7 @@ export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: R
     throw new ApiError(400, "No file uploaded");
   }
 
-  const cloudinaryFile = await uploadBuffer(req.file.buffer, "chakricv/resumes", "raw", {
+  const cloudinaryFile = await uploadBuffer(req.file.buffer, "aicvbuilderbd/resumes", "raw", {
     resource_type: "raw",
     use_filename: true,
     unique_filename: true,
