@@ -7,6 +7,7 @@ import templateRoutes from "./template.routes.js";
 import blogRoutes from "./blog.routes.js";
 import adminRoutes from "./admin.routes.js";
 import pageContentRoutes from "./pageContent.routes.js";
+import contactRoutes from "./contact.routes.js";
 
 const router = Router();
 
@@ -18,6 +19,7 @@ router.use("/templates", templateRoutes);
 router.use("/blogs", blogRoutes);
 router.use("/page-content", pageContentRoutes);
 router.use("/admin", adminRoutes);
+router.use("/contact", contactRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({ success: true, message: "AI CV Builder BD API is running", version: "1.0.0" });

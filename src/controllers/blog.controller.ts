@@ -7,7 +7,7 @@ import { AuthRequest } from "../middleware/auth.middleware.js";
 export const getPublishedBlogs = asyncHandler(async (req: AuthRequest, res: Response) => {
   const page = Number(req.query.page) || 1;
   const limit = 10;
-  const language = req.query.language as string | undefined;
+  const language = req.query.language === "bn" || req.query.language === "en" ? req.query.language : undefined;
 
   const filter: Record<string, unknown> = { isPublished: true };
   if (language) filter.language = language;

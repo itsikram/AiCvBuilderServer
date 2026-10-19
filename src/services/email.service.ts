@@ -1,6 +1,9 @@
 import nodemailer from "nodemailer";
 import { config } from "../config/index.js";
 
+export const escapeHtml = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
 const createTransporter = () => {
   if (!config.email.host || !config.email.user) {
     return null;
@@ -38,7 +41,7 @@ export const sendVerificationEmail = async (
     `Verify your ${config.app.name} account`,
     `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2>Welcome to ${config.app.name}, ${name}!</h2>
+      <h2>Welcome to ${config.app.name}, ${escapeHtml(name)}!</h2>
       <p>Please verify your email address to get started building your professional resume.</p>
       <a href="${verifyUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; margin: 16px 0;">
         Verify Email
@@ -61,7 +64,7 @@ export const sendPasswordResetEmail = async (
     `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
       <h2>Password Reset</h2>
-      <p>Hi ${name}, click below to reset your password. Link expires in 1 hour.</p>
+      <p>Hi ${escapeHtml(name)}, click below to reset your password. Link expires in 1 hour.</p>
       <a href="${resetUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px;">
         Reset Password
       </a>

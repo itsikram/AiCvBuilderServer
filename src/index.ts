@@ -2,25 +2,54 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import compression from "compression";
 import cookieParser from "cookie-parser";
 import mongoSanitize from "express-mongo-sanitize";
-import path from "path";
-import { fileURLToPath } from "url";
 import { config } from "./config/index.js";
 import { connectDatabase } from "./config/database.js";
 import { getRedis } from "./config/redis.js";
 import { initCloudinary } from "./services/cloudinary.service.js";
 import routes from "./routes/index.js";
+import siteRoutes from "./web/site.routes.js";
+import { clientDistPath, hasClientBuild } from "./web/clientApp.js";
 import { errorHandler, notFound } from "./middleware/error.middleware.js";
 import { generalLimiter } from "./middleware/rateLimit.middleware.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { canonicalRedirect } from "./middleware/canonical.middleware.js";
 
 const app = express();
 
 app.set("trust proxy", 1);
+app.disable("x-powered-by");
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        "default-src": ["'self'"],
+        "script-src": ["'self'", "https://www.googletagmanager.com", "https://accounts.google.com/gsi/client"],
+        "connect-src": [
+          "'self'",
+          "https://accounts.google.com",
+          "https://www.googletagmanager.com",
+          "https://*.google-analytics.com",
+          "https://*.analytics.google.com",
+        ],
+        "img-src": ["'self'", "data:", "blob:", "https:"],
+        "style-src": ["'self'", "'unsafe-inline'", "https://accounts.google.com/gsi/style"],
+        "font-src": ["'self'", "data:"],
+        "frame-src": ["https://accounts.google.com"],
+        "object-src": ["'none'"],
+        "base-uri": ["'self'"],
+        "frame-ancestors": ["'self'"],
+        "upgrade-insecure-requests": config.env === "production" ? [] : null,
+      },
+    },
+    // Google Sign-In uses a popup that must be able to message this window
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+  })
+);
+app.use(canonicalRedirect);
+app.use(compression());
 app.use(
   cors({
     // Same-origin requests send no Origin header; cross-origin ones must be allow-listed
@@ -29,53 +58,43 @@ app.use(
   })
 );
 app.use(morgan(config.env === "development" ? "dev" : "combined"));
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use(mongoSanitize());
-app.use(generalLimiter);
 
-// Serve static files from the React app in production
-if (config.env === "production") {
-  const clientDistPath = path.join(__dirname, "../../client/dist");
-  
-  // Custom middleware to serve static files or pass to next handler
-  app.use((req, res, next) => {
-    // If it's an API request, skip static serving
-    if (req.path.startsWith("/api/")) {
-      return next();
-    }
-    next();
-  });
-  
-  // Serve static assets from the client build
-  app.use(express.static(clientDistPath, {
-    fallthrough: true // Let non-existent files pass through to the next handler
-  }));
+// Built client assets: hashed files are immutable, everything else revalidates daily.
+// HTML is handled by siteRoutes so status codes and head tags are correct.
+if (hasClientBuild()) {
+  app.use(
+    express.static(clientDistPath, {
+      index: false,
+      redirect: false,
+      setHeaders: (res, filePath) => {
+        if (/[\\/]assets[\\/]/.test(filePath)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        } else if (filePath.endsWith(".html") || filePath.endsWith(".json")) {
+          res.setHeader("Cache-Control", "no-cache");
+        } else {
+          res.setHeader("Cache-Control", "public, max-age=86400");
+        }
+      },
+    })
+  );
 }
 
-app.use("/api/v1", routes);
+app.use(
+  "/api/v1",
+  generalLimiter,
+  express.json({ limit: "5mb" }),
+  express.urlencoded({ extended: true, limit: "5mb" }),
+  mongoSanitize(),
+  routes
+);
+app.use("/api", notFound);
 
-// Root route
-app.get("/", (req, res) => {
-  if (config.env === "production") {
-    res.sendFile(path.join(__dirname, "../../client/dist/index.html"));
-  } else {
-    res.json({
-      name: config.app.name,
-      version: "1.0.0",
-      docs: "/api/v1/health",
-    });
-  }
-});
+app.use(siteRoutes);
 
-// SPA catch-all route - must come BEFORE notFound middleware
-app.get("*", (req, res) => {
-  if (config.env === "production") {
-    res.sendFile(path.join(__dirname, "../../client/dist/index.html"));
-  } else {
-    res.status(404).json({ error: "Not found" });
-  }
+// Development without a client build: the Vite dev server serves the UI
+app.get("/", (_req, res) => {
+  res.json({ name: config.app.name, version: "1.0.0", docs: "/api/v1/health" });
 });
 
 app.use(notFound);
@@ -90,7 +109,7 @@ const start = async () => {
       await redis.connect();
       console.log("Redis connected");
     } catch {
-      console.warn("Redis connection failed, continuing without cache");
+      console.warn("Redis connection failed, continuing with the in-memory cache");
     }
   }
 
@@ -99,6 +118,8 @@ const start = async () => {
   });
 };
 
-start();
+if (process.env.NODE_ENV !== "test") {
+  start();
+}
 
 export default app;
