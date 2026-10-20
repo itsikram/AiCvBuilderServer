@@ -93,6 +93,10 @@ export const config = {
   siteUrl,
   allowedOrigins: buildAllowedOrigins(),
   cookieDomain: process.env.COOKIE_DOMAIN || undefined,
+  // "none" when the frontend is on a different site than the API (requires HTTPS)
+  cookieSameSite: (["lax", "strict", "none"].includes(process.env.COOKIE_SAME_SITE || "")
+    ? process.env.COOKIE_SAME_SITE
+    : "lax") as "lax" | "strict" | "none",
   mongodbUri: process.env.MONGODB_URI || "mongodb://localhost:27017/aicvbuilderbd",
   jwt: {
     secret: process.env.JWT_SECRET || "dev-secret-change-me-in-production-32chars",

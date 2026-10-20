@@ -16,6 +16,14 @@ const googleClient = config.google.clientId
   ? new OAuth2Client(config.google.clientId)
   : null;
 
+// clearCookie only matches when these options equal the ones the cookie was set with
+const refreshCookieOptions = {
+  httpOnly: true,
+  secure: config.env === "production" || config.cookieSameSite === "none",
+  sameSite: config.cookieSameSite,
+  domain: config.cookieDomain,
+};
+
 const sendTokens = (res: Response, user: InstanceType<typeof User>) => {
   const payload = {
     userId: user._id.toString(),
@@ -26,10 +34,7 @@ const sendTokens = (res: Response, user: InstanceType<typeof User>) => {
   const refreshToken = generateRefreshToken(payload);
 
   res.cookie("refreshToken", refreshToken, {
-    httpOnly: true,
-    secure: config.env === "production",
-    sameSite: "lax",
-    domain: config.cookieDomain,
+    ...refreshCookieOptions,
     maxAge: 30 * 24 * 60 * 60 * 1000,
   });
 
@@ -167,7 +172,7 @@ export const refreshToken = asyncHandler(async (req: AuthRequest, res: Response)
 });
 
 export const logout = asyncHandler(async (_req: AuthRequest, res: Response) => {
-  res.clearCookie("refreshToken", { domain: config.cookieDomain });
+  res.clearCookie("refreshToken", refreshCookieOptions);
   res.json({ success: true, message: "Logged out" });
 });
 
