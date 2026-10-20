@@ -1,0 +1,27 @@
+# Render blueprint for the API. The frontend is a separate repo (aicvbuilderbd-client) deployed as static
+# files on cPanel (https://aicvbuilderbd.online), so the refresh-token cookie is
+# cross-site and needs COOKIE_SAME_SITE=none.
+services:
+  - type: web
+    name: aicvbuilderbd
+    env: node
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SITE_URL
+        value: https://aicvbuilderbd.online
+      - key: COOKIE_SAME_SITE
+        value: none
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: GEMINI_API_KEYS
+        sync: false
+      - key: DISABLE_REDIS
+        value: true
