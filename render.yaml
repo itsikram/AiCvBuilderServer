@@ -3,8 +3,8 @@
 # cross-site and needs COOKIE_SAME_SITE=none.
 services:
   - type: web
-    name: aicvbuilderbd
-    env: node
+    name: aicvbuilderbd-server
+    runtime: node
     buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /api/v1/health
