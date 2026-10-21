@@ -138,6 +138,8 @@ export interface AiQuota {
   monthlyLimit: number;
   usedThisMonth: number;
   resetsAt: string;
+  /** Exported PDFs carry the site watermark (free plan by default) */
+  watermarkPdf: boolean;
 }
 
 export const getAiQuota = async (user: IUser): Promise<AiQuota> => {
@@ -149,6 +151,7 @@ export const getAiQuota = async (user: IUser): Promise<AiQuota> => {
     monthlyLimit: limits.maxAiRequests,
     usedThisMonth: user.usage.aiRequestsThisMonth,
     resetsAt: nextBdMidnight().toISOString(),
+    watermarkPdf: limits.watermarkPdf,
   };
 };
 
