@@ -126,18 +126,21 @@ Audit date: 2026-10-19. Baseline commit: `463ed31`.
 
 ## Status checklist
 
+Status on 2026-10-21: every item is fixed. Lighthouse mobile performance is still below 90
+(see the client repo docs/SEO_LAUNCH_CHECKLIST.md); re-measure on the live site.
+
 Each item is ticked when fixed; the phase that addresses it is in brackets.
 
 - [x] 1, 2, 3 API ownership, mass assignment, cache key (Phase 4)
 - [x] 4 seed: admin credentials from env, non-destructive upsert (Phase 4)
-- [ ] 5, 12, 29 real 404s, redirects, compression, caching (Phase 3)
-- [ ] 6 PDF matches preview, Bangla-safe (Phase 5)
+- [x] 5, 12, 29 real 404s, redirects, compression, caching (Phase 3) — client .htaccess: real 404s, http/www redirects, deflate, immutable caching
+- [x] 6 PDF matches preview, Bangla-safe (Phase 5) — print-based export from the preview; server PDF kept for English quick download
 - [x] 7 import without Cloudinary; honest file types (Phase 4)
-- [ ] 8 route admin blog manager (Phase 3)
+- [x] 8 route admin blog manager (Phase 3) — /admin/blog
 - [x] 9 admin-configurable quotas (Phase 6)
 - [x] 10, 11 Gemini timeouts, backoff, schema validation, no invented metrics (Phase 4/6)
-- [ ] 13–17 i18n, autosave, BD sections, dialogs, a11y (Phase 5)
-- [ ] 18 marketing claims (Phase 3, content)
+- [x] 13–17 i18n, autosave, BD sections, dialogs, a11y (Phase 5) — client editor rewrite; en/bn key parity checked at build
+- [x] 18 marketing claims (Phase 3, content) — landing stats are admin-published only; defaults are verifiable
 - [x] 19, 20, 31–34 config and branding (Phase 1/4)
-- [ ] 22–28 SEO (Phase 3)
-- [ ] 21 lint (ongoing)
+- [x] 22–28 SEO (Phase 3) — client prerender, hreflang, JSON-LD, guides, per-language chunks
+- [x] 21 lint (ongoing) — npm run lint is clean

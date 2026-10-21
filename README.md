@@ -3,7 +3,7 @@
 > This repository is the **API** (Express + MongoDB). The React frontend lives in its own
 > repository (`aicvbuilderbd-client`) and is deployed separately as static files.
 
-Production-ready MERN stack SaaS platform for building ATS-optimized resumes, cover letters, and career documents. Powered by **Google Gemini 2.5 Flash**.
+API for a bilingual (Bangla/English) CV builder for the Bangladesh job market: CVs, AI writing help, cover letters, payments and admin. AI runs on **Google Gemini** (model set by `GEMINI_MODEL`, default `gemini-3.5-flash-lite`).
 
 ![Stack](https://img.shields.io/badge/Stack-MERN-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)
@@ -11,7 +11,10 @@ Production-ready MERN stack SaaS platform for building ATS-optimized resumes, co
 
 ## Features
 
-- **AI Resume Generator** — Professional summaries, bullet points, skills (Gemini 2.5 Flash)
+- **AI writing help** — objective/summary options with tone, action-verb duty lines (numbers only if the user gave them), skill suggestions
+- **Tailor to a job** — match score, matched/missing keywords and field-level edits the user approves one by one (English or Bangla job posts)
+- **Grammar check and translation** — per-field fixes; translated copy of a CV (English ↔ Bangla)
+- **Import** — PDF, Word (.docx) or pasted text/LinkedIn mapped into CV fields (SSC/HSC/Honours, GPA/CGPA, personal details)
 - **AI Resume Improver** — Keyword optimization from job descriptions + ATS score
 - **ATS Score Checker** — Detailed compatibility analysis
 - **Cover Letter Generator** — Personalized letters with PDF export
@@ -114,6 +117,13 @@ npm run dev
 - Frontend: run the client repo's `npm run dev` (http://localhost:5173); its Vite dev
   server proxies `/api` to this API.
 
+### Tests
+
+```bash
+npm test        # node:test via tsx (src/**/*.test.ts)
+npm run typecheck
+```
+
 ### Docker
 
 ```bash
@@ -136,7 +146,14 @@ See [docs/API.md](docs/API.md) for full endpoint reference.
 | POST | `/auth/google` | Google OAuth |
 | GET | `/resumes` | List resumes |
 | POST | `/resumes` | Create resume |
-| POST | `/resumes/ai/generate` | AI generate content |
+| GET | `/resumes/ai/quota` | Today's/this month's AI usage |
+| POST | `/resumes/ai/write-summary` | Objective or summary options |
+| POST | `/resumes/ai/rewrite-bullets` | Polish job duty lines |
+| POST | `/resumes/ai/suggest-skills` | Skills for a job title |
+| POST | `/resumes/ai/tailor` | Match a CV to a job post |
+| POST | `/resumes/ai/grammar` | Grammar and spelling fixes |
+| POST | `/resumes/:id/translate` | Translated copy of a CV |
+| POST | `/resumes/import-text` | Import pasted CV/LinkedIn text |
 | POST | `/resumes/ai/ats-check` | ATS analysis |
 | POST | `/cover-letters/generate` | AI cover letter |
 | GET | `/payments/plans` | Subscription plans |
@@ -153,7 +170,19 @@ See [docs/API.md](docs/API.md) for full endpoint reference.
    calling `*.onrender.com`), set `COOKIE_SAME_SITE=none` so the refresh-token cookie is
    sent cross-site. Browsers that block third-party cookies (Safari, some privacy modes)
    will still drop it; serving the API from `api.<your-domain>` avoids that.
-4. Add MongoDB Atlas + Redis URLs to env
+4. Add the MongoDB Atlas URI to env. Redis is optional: without `REDIS_URL` (or with
+   `DISABLE_REDIS=true`) the cache falls back to process memory, which suits a single process.
+
+For GoDaddy/cPanel hosting (Node.js App or static frontend + API elsewhere) see the client repository's
+`docs/DEPLOY_GODADDY.md`.
+
+### Gemini keys and model
+
+- `GEMINI_API_KEYS`: comma-separated keys; requests rotate between them. Rate-limited keys cool down for a
+  minute; invalid or leaked keys are disabled for 6 hours and logged by index (keys are never logged).
+- `GEMINI_MODEL` (default `gemini-3.5-flash-lite`), optional `GEMINI_FALLBACK_MODEL` used if the main
+  model is retired, `GEMINI_TIMEOUT_MS`, `GEMINI_MAX_RETRIES` (429/5xx/timeouts, exponential backoff).
+- Every AI answer is requested as JSON with a schema and validated with zod before use.
 
 ### Frontend
 
@@ -173,12 +202,17 @@ mongodb+srv://user:pass@cluster.mongodb.net/aicvbuilderbd
 |---------|------|---------|
 | Resumes | 2 | Unlimited |
 | AI requests/month | 5 | 100 |
+| AI requests/day | 10 | 100 |
 | PDF watermark | Yes | No |
 | Premium templates | No | Yes |
 | ATS checker | No | Yes |
 | Cover letters | No | Yes |
 | AI optimization | No | Yes |
 | Price | ৳0 | ৳499/mo |
+
+These are the seeded defaults. Plan limits are edited in Admin → Plans; Admin → Settings can override
+`MAX_RESUMES_*`, `MAX_AI_REQUESTS_*` (per month) and `AI_DAILY_QUOTA_*` (per day, resets at midnight
+Bangladesh time; defaults come from the `AI_DAILY_QUOTA_FREE/PREMIUM` env vars). `-1` means unlimited.
 
 Coupon code `AICVBD20` — 20% off Premium (seeded).
 
