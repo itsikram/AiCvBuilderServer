@@ -52,8 +52,24 @@ app.get("/", (_req, res) => {
 app.use(notFound);
 app.use(errorHandler);
 
+// Retry instead of exiting: on cPanel (Passenger) a crash only shows a generic error page,
+// while a running app reports the database error at /api/v1/health
+const connectWithRetry = async (): Promise<void> => {
+  try {
+    await connectDatabase();
+  } catch (error) {
+    console.error("MongoDB connection error (retrying in 30s):", error);
+    setTimeout(connectWithRetry, 30_000);
+  }
+};
+
 const start = async () => {
-  await connectDatabase();
+  // Listen first so Passenger's startup timeout never depends on how fast MongoDB answers
+  app.listen(config.port, () => {
+    console.log(`${config.app.name} API running on port ${config.port}`);
+  });
+
+  await connectWithRetry();
   initCloudinary();
   const redis = getRedis();
   if (redis) {
@@ -64,14 +80,14 @@ const start = async () => {
       console.warn("Redis connection failed, continuing with the in-memory cache");
     }
   }
-
-  app.listen(config.port, () => {
-    console.log(`${config.app.name} API running on port ${config.port}`);
-  });
 };
 
 if (process.env.NODE_ENV !== "test") {
-  start();
+  process.on("unhandledRejection", (reason) => console.error("Unhandled rejection:", reason));
+  start().catch((error) => {
+    console.error("Startup failed:", error);
+    process.exit(1);
+  });
 }
 
 export default app;

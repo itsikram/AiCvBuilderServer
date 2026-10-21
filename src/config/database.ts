@@ -31,9 +31,20 @@ export const connectDatabase = async (): Promise<void> => {
       console.log("In-memory MongoDB connected successfully");
       return;
     }
-    console.error("MongoDB connection error:", error);
-    process.exit(1);
+    lastConnectionError =
+      error instanceof Error ? error.message.replace(/mongodb(\+srv)?:\/\/\S+/g, "<uri>") : String(error);
+    throw error;
   }
+};
+
+let lastConnectionError: string | null = null;
+
+const STATES: readonly string[] = ["disconnected", "connected", "connecting", "disconnecting"];
+
+/** Connection state for the health check; the error never includes the connection string */
+export const getDatabaseStatus = () => {
+  const state = STATES[mongoose.connection.readyState] ?? "unknown";
+  return state === "connected" ? { state } : { state, lastError: lastConnectionError };
 };
 
 mongoose.connection.on("disconnected", () => {

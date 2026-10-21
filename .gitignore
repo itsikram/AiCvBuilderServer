@@ -10,3 +10,4 @@ uploads/
 .DS_Store
 .vscode/
 .idea/
+deploy/

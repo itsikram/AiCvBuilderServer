@@ -8,6 +8,7 @@ import blogRoutes from "./blog.routes.js";
 import adminRoutes from "./admin.routes.js";
 import pageContentRoutes from "./pageContent.routes.js";
 import contactRoutes from "./contact.routes.js";
+import { getDatabaseStatus } from "../config/database.js";
 
 const router = Router();
 
@@ -22,7 +23,12 @@ router.use("/admin", adminRoutes);
 router.use("/contact", contactRoutes);
 
 router.get("/health", (_req, res) => {
-  res.json({ success: true, message: "AI CV Builder BD API is running", version: "1.0.0" });
+  res.json({
+    success: true,
+    message: "AI CV Builder BD API is running",
+    version: "1.0.0",
+    database: getDatabaseStatus(),
+  });
 });
 
 export default router;
