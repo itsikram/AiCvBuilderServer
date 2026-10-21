@@ -109,6 +109,60 @@ Public resume (no auth).
 { "resumeText": "...", "jobDescription": "optional" }
 ```
 
+### AI tasks on a CV
+
+These take either `content` (the editor's current, possibly unsaved CV content, without
+the profile photo) or `resumeId` (a saved CV owned by the caller), plus `language`
+(`en`/`bn`, the language to write in). Nothing is saved: the client applies what the user
+accepts. Each successful call counts as one AI request against the quota.
+
+#### GET /resumes/ai/quota
+`{ dailyLimit, usedToday, monthlyLimit, usedThisMonth, resetsAt }`; `-1` means unlimited.
+Daily limits reset at midnight Bangladesh time.
+
+#### POST /resumes/ai/write-summary
+```json
+{ "kind": "summary | objective", "content": {...}, "jobTitle": "optional", "tone": "formal | confident | friendly", "language": "en" }
+```
+Returns `{ options: string[3], tip }`.
+
+#### POST /resumes/ai/rewrite-bullets
+```json
+{ "position": "Accounts Intern", "company": "ABC Traders", "bullets": ["..."], "jobTitle": "optional", "tone": "formal", "language": "en" }
+```
+Returns `{ bullets, tips }`. Numbers are kept, never invented; `tips` asks for missing ones.
+
+#### POST /resumes/ai/suggest-skills
+`{ "jobTitle": "Junior Accountant", "currentSkills": ["Excel"], "language": "en" }` returns `{ skills, reasoning }` (skills the CV doesn't list yet).
+
+#### POST /resumes/ai/tailor
+`{ "content": {...}, "jobDescription": "job post in English or Bangla", "language": "en" }` returns
+```json
+{
+  "matchScore": 62,
+  "verdict": "...",
+  "matchedKeywords": ["Tally"],
+  "missingKeywords": ["VAT"],
+  "edits": [{ "key": "e0", "type": "rewrite | add_skill", "path": "experience.0.bullets.1", "before": "...", "after": "...", "reason": "..." }]
+}
+```
+`path` is a dot path into the CV content; the user approves each edit separately.
+
+#### POST /resumes/ai/grammar
+`{ "content": {...}, "language": "en" }` returns `{ issues: [{ path, original, corrected, explanation }] }`.
+
+#### POST /resumes/:id/translate
+`{ "targetLanguage": "bn" }` creates a translated copy (201, the new CV). The original is unchanged.
+Counts against the CV limit.
+
+#### POST /resumes/import-text
+`{ "text": "pasted CV or LinkedIn profile text", "resumeId": "optional" }` parses the text into CV
+fields (SSC/HSC/Honours, GPA, personal details...). With `resumeId` it replaces that CV's content;
+otherwise it creates a new CV.
+
+#### POST /resumes/upload-parse
+Multipart `file` (PDF or .docx, up to 10 MB) and optional `resumeId`; same result as import-text.
+
 ---
 
 ## Cover Letters
@@ -122,7 +176,8 @@ Public resume (no auth).
   "jobTitle": "Software Engineer",
   "jobDescription": "...",
   "resumeId": "optional",
-  "language": "en"
+  "language": "en",
+  "tone": "formal | confident | friendly"
 }
 ```
 
@@ -197,6 +252,8 @@ SSLCommerz IPN callback (server-to-server).
 
 ## Rate Limits
 
-- General: 200 req / 15 min
-- Auth: 20 req / 15 min
-- AI: 30 req / hour
+- General: 300 req / 15 min per IP
+- Auth (login, register, reset): 20 req / 15 min per IP
+- AI: 40 req / hour per user, plus the plan quotas (monthly per plan, daily via
+  `AI_DAILY_QUOTA_FREE` / `AI_DAILY_QUOTA_PREMIUM`, both overridable in Admin -> Settings)
+- Over-limit responses: 429 (rate limit or daily quota), 403 (monthly plan limit)

@@ -1,6 +1,6 @@
 import type { IResumeContent } from "../../models/Resume.js";
 
-type Content = Partial<IResumeContent> & Record<string, unknown>;
+type Content = Partial<IResumeContent>;
 
 const line = (...parts: Array<string | undefined | null | false>) => parts.filter(Boolean).join(" | ");
 

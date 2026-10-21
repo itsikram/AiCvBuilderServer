@@ -8,6 +8,7 @@ import { Blog } from "../models/Blog.js";
 import { PageContent } from "../models/PageContent.js";
 import { BkashConfig } from "../models/BkashConfig.js";
 import { AdminSetting } from "../models/AdminSetting.js";
+import { invalidateSettings } from "../services/settings.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
@@ -472,6 +473,8 @@ const ALLOWED_SETTINGS_KEYS = [
   'MAX_AI_REQUESTS_FREE',
   'MAX_RESUMES_PREMIUM',
   'MAX_AI_REQUESTS_PREMIUM',
+  'AI_DAILY_QUOTA_FREE',
+  'AI_DAILY_QUOTA_PREMIUM',
   'MAINTENANCE_MODE',
   'REGISTRATION_ENABLED',
   'GOOGLE_CLIENT_ID',
@@ -486,6 +489,8 @@ const ALLOWED_SETTINGS_KEYS = [
   'NAGAD_MERCHANT_NUMBER',
   'NAGAD_MERCHANT_PASSWORD',
 ];
+
+const SECRET_SETTING = /PASS|SECRET|PRIVATE|API_KEY/;
 
 export const getAdminSettings = asyncHandler(async (_req: AuthRequest, res: Response) => {
   const settings = await AdminSetting.find().sort({ key: 1 });
@@ -507,11 +512,12 @@ export const getAdminSettings = asyncHandler(async (_req: AuthRequest, res: Resp
     };
   }
   
-  // Include allowed keys even if not set (with empty values)
+  // Include allowed keys even if not set. Env values are shown as the default, except
+  // secrets, which never leave the server.
   for (const key of ALLOWED_SETTINGS_KEYS) {
     if (!settingsMap[key]) {
       settingsMap[key] = {
-        value: process.env[key] || '',
+        value: SECRET_SETTING.test(key) ? '' : process.env[key] || '',
         updatedAt: new Date(),
       };
     }
@@ -544,6 +550,7 @@ export const updateAdminSetting = asyncHandler(async (req: AuthRequest, res: Res
     },
     { new: true, upsert: true, runValidators: true }
   );
+  invalidateSettings();
   
   res.json({
     success: true,
@@ -559,6 +566,7 @@ export const deleteAdminSetting = asyncHandler(async (req: AuthRequest, res: Res
   }
   
   const setting = await AdminSetting.findOneAndDelete({ key });
+  invalidateSettings();
   
   if (!setting) {
     throw new ApiError(404, 'Setting not found');

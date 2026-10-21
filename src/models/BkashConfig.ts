@@ -28,6 +28,6 @@ bkashConfigSchema.pre("save", function (next) {
   next();
 });
 
-bkashConfigSchema.index({ provider: 1 });
+// provider is indexed by its unique: true option
 
 export const BkashConfig = mongoose.model<IBkashConfig>("BkashConfig", bkashConfigSchema);

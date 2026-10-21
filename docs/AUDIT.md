@@ -128,16 +128,16 @@ Audit date: 2026-10-19. Baseline commit: `463ed31`.
 
 Each item is ticked when fixed; the phase that addresses it is in brackets.
 
-- [ ] 1, 2, 3 API ownership, mass assignment, cache key (Phase 4)
-- [ ] 4 seed: admin credentials from env, non-destructive upsert (Phase 4)
+- [x] 1, 2, 3 API ownership, mass assignment, cache key (Phase 4)
+- [x] 4 seed: admin credentials from env, non-destructive upsert (Phase 4)
 - [ ] 5, 12, 29 real 404s, redirects, compression, caching (Phase 3)
 - [ ] 6 PDF matches preview, Bangla-safe (Phase 5)
-- [ ] 7 import without Cloudinary; honest file types (Phase 4)
+- [x] 7 import without Cloudinary; honest file types (Phase 4)
 - [ ] 8 route admin blog manager (Phase 3)
-- [ ] 9 admin-configurable quotas (Phase 6)
-- [ ] 10, 11 Gemini timeouts, backoff, schema validation, no invented metrics (Phase 4/6)
+- [x] 9 admin-configurable quotas (Phase 6)
+- [x] 10, 11 Gemini timeouts, backoff, schema validation, no invented metrics (Phase 4/6)
 - [ ] 13–17 i18n, autosave, BD sections, dialogs, a11y (Phase 5)
 - [ ] 18 marketing claims (Phase 3, content)
-- [ ] 19, 20, 31–34 config and branding (Phase 1/4)
+- [x] 19, 20, 31–34 config and branding (Phase 1/4)
 - [ ] 22–28 SEO (Phase 3)
 - [ ] 21 lint (ongoing)

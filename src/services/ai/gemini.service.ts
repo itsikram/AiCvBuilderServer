@@ -28,10 +28,43 @@ const generateResumeSchema = S.object({
 });
 
 const tailorSchema = S.object({
-  summary: S.string(undefined, 1200),
-  skills: S.array(S.string(undefined, 60), 20),
-  experienceBullets,
-  suggestions: S.array(S.string(undefined, 300), 8),
+  matchScore: S.number("0-100: how well the CV as written fits the job", 0, 100),
+  verdict: S.string("1-2 sentences on the fit and the biggest gap", 400),
+  matchedKeywords: S.array(S.string(undefined, 60), 25),
+  missingKeywords: S.array(S.string("Important job keyword or requirement not shown in the CV", 60), 25),
+  edits: S.array(
+    S.object({
+      id: S.string("A field id from <fields> (f0, f1, ...) to rewrite, or \"skill\" to add a skill", 10),
+      after: S.string("The new text for that field, or the skill name to add", 1200),
+      reason: S.string("Why this helps for this job, in a few words", 200),
+    }),
+    10
+  ),
+});
+
+const writeOptionsSchema = S.object({
+  options: S.array(S.string(undefined, 1200), 3),
+  tip: S.string("One short tip on what the candidate could add to make it stronger", 300),
+});
+
+const bulletsSchema = S.object({
+  bullets: S.array(S.string(undefined, 300), 6),
+  tips: S.array(S.string("A question or tip, e.g. which number to add", 200), 3),
+});
+
+const grammarSchema = S.object({
+  issues: S.array(
+    S.object({
+      id: S.string("Field id from <fields>", 10),
+      corrected: S.string("The full corrected text of that field", 3000),
+      explanation: S.string("What was wrong, in a few words", 200),
+    }),
+    30
+  ),
+});
+
+const translateSchema = S.object({
+  fields: S.array(S.object({ id: S.string(undefined, 10), text: S.string(undefined, 3000) }), 120),
 });
 
 const improveSchema = S.object({
@@ -169,16 +202,103 @@ class GeminiService {
     });
   }
 
-  tailorResume(cvText: string, jobDescription: string, language: Lang) {
+  /**
+   * Scores the CV against a job post and proposes edits the user approves one by
+   * one. `fields` are the CV's prose fields (summary, objective, bullets...) with ids.
+   */
+  tailorResume(cvText: string, fields: string, jobDescription: string, language: Lang) {
     return generateJson({
       task: "tailor-resume",
       system: baseSystem(language),
       schema: tailorSchema,
+      temperature: 0.3,
+      maxOutputTokens: 3000,
       prompt: [
-        "Tailor this CV to the job. Rewrite the summary for the role, reorder and filter skills to what the job needs (only skills the candidate has),",
-        "and rewrite bullets of the most relevant experience entries (reference each entry by its [index]). List the top keywords or themes to emphasise.",
+        "Compare the CV with the job post (it may be in English or Bangla, e.g. a bdjobs.com circular).",
+        "1. matchScore: how well the CV as written matches the requirements (skills, experience, education, keywords).",
+        "2. matchedKeywords / missingKeywords: the job's important keywords and requirements, split by whether the CV shows them.",
+        "3. edits: up to 8 concrete edits, most valuable first. Rewrite a field from <fields> by its id so it highlights",
+        "relevant facts the candidate already has and uses the job's wording. Use id \"skill\" to add a skill only if the CV",
+        "shows evidence of it. Never claim experience, tools or qualifications the CV doesn't show.",
         asData("cv", cvText),
-        asData("job", jobDescription),
+        asData("fields", fields),
+        asData("job", jobDescription.slice(0, 8000)),
+      ].join("\n"),
+    });
+  }
+
+  /** Three alternative summaries or career objectives in the requested tone. */
+  writeSummary(input: { kind: "summary" | "objective"; cvText: string; current: string; jobTitle: string; tone: Tone; language: Lang }) {
+    const what =
+      input.kind === "summary"
+        ? "a professional summary (2-4 sentences: who the candidate is, key strengths, what they offer)"
+        : "a career objective (2-3 sentences: the role they want and what they will contribute), as used on Bangladeshi CVs";
+    return generateJson({
+      task: `write-${input.kind}`,
+      system: baseSystem(input.language),
+      schema: writeOptionsSchema,
+      temperature: 0.7,
+      maxOutputTokens: 1200,
+      prompt: [
+        `Write 3 different versions of ${what}${input.jobTitle ? ` for a "${input.jobTitle}" role` : ""}.`,
+        `Tone: ${TONES[input.tone]}. Base it only on the CV facts.`,
+        input.current ? "Improve on the candidate's current draft (in <text>), keeping its facts." : "",
+        asData("cv", input.cvText),
+        input.current ? asData("text", input.current) : "",
+      ].join("\n"),
+    });
+  }
+
+  /** Rewrites one job's bullets with action verbs; numbers only if the user gave them. */
+  rewriteBullets(input: { position: string; company: string; bullets: string[]; jobTitle: string; tone: Tone; language: Lang }) {
+    return generateJson({
+      task: "rewrite-bullets",
+      system: baseSystem(input.language),
+      schema: bulletsSchema,
+      temperature: 0.5,
+      maxOutputTokens: 1200,
+      prompt: [
+        `Rewrite the duties of this job as 3-5 CV bullet points${input.jobTitle ? ` that suit a "${input.jobTitle}" application` : ""}.`,
+        "Start each with a strong past-tense action verb (present tense if the job is current). One line each, under 25 words.",
+        "Show results and scope. Keep every number the user gave; never add new numbers. If a number would make a bullet",
+        "much stronger, ask for it in tips instead (e.g. \"How many customers did you handle per day?\").",
+        `Tone: ${TONES[input.tone]}.`,
+        asData("notes", [`Position: ${input.position || "-"}`, `Company: ${input.company || "-"}`, ...input.bullets.map((b) => `- ${b}`)].join("\n")),
+      ].join("\n"),
+    });
+  }
+
+  grammarCheck(fields: string, language: Lang) {
+    return generateJson({
+      task: "grammar-check",
+      system: baseSystem(language).replace(languageNeutral, "Keep each field in its original language."),
+      schema: grammarSchema,
+      temperature: 0,
+      maxOutputTokens: 4000,
+      prompt: [
+        "Check each field for spelling, grammar, punctuation and capitalisation mistakes (English or Bangla).",
+        "Only report fields that need a change; return the full corrected text of that field. Keep the meaning, facts and",
+        "style; don't rewrite text that is already correct. Fix inconsistent tense in bullets.",
+        asData("fields", fields),
+      ].join("\n"),
+    });
+  }
+
+  translateFields(fields: string, target: Lang) {
+    const targetName = target === "bn" ? "Bangla (বাংলা)" : "English";
+    return generateJson({
+      task: `translate-${target}`,
+      system: baseSystem(target),
+      schema: translateSchema,
+      temperature: 0.2,
+      maxOutputTokens: 8000,
+      prompt: [
+        `Translate every field into natural, professional ${targetName} for a CV. Return every id exactly once.`,
+        "Fields marked (name) are people, employers or institutions: transliterate them into the target script only if",
+        "that is how they are normally written there (Bangladeshi people's names usually are); otherwise keep them unchanged.",
+        "Keep degree names (SSC, HSC, BSc, MBA), GPA/CGPA values, software and brand names in their usual form.",
+        "If a field is already in the target language, return it unchanged.",
+        asData("fields", fields),
       ].join("\n"),
     });
   }

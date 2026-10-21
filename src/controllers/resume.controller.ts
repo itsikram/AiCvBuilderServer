@@ -3,7 +3,7 @@ import fs from "fs";
 import { createHash } from "crypto";
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
-import { IResumeContent, Resume } from "../models/Resume.js";
+import { DEFAULT_SECTION_ORDER, IResumeContent, Resume } from "../models/Resume.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
@@ -11,7 +11,6 @@ import { generateUniqueSlug } from "../utils/slug.js";
 import { normalizeLanguage } from "../utils/language.js";
 import { config } from "../config/index.js";
 import { geminiService, type ParsedCv } from "../services/ai/gemini.service.js";
-import { cvToText } from "../services/ai/cvText.js";
 import {
   checkResumeLimit,
   checkAiLimit,
@@ -123,14 +122,23 @@ export const createResume = asyncHandler(async (req: AuthRequest, res: Response)
         location: "Dhaka, Bangladesh",
         summary: "",
       },
+      careerObjective: "",
+      personalDetails: { nationality: resolvedLanguage === "bn" ? "বাংলাদেশী" : "Bangladeshi" },
       experience: [],
+      trainings: [],
       education: [],
       projects: [],
       skills: [],
-      languages: [
-        { id: uuidv4(), name: "Bangla", proficiency: "native" },
-        { id: uuidv4(), name: "English", proficiency: "fluent" },
-      ],
+      languages:
+        resolvedLanguage === "bn"
+          ? [
+              { id: uuidv4(), name: "বাংলা", proficiency: "native" },
+              { id: uuidv4(), name: "ইংরেজি", proficiency: "fluent" },
+            ]
+          : [
+              { id: uuidv4(), name: "Bangla", proficiency: "native" },
+              { id: uuidv4(), name: "English", proficiency: "fluent" },
+            ],
       certifications: [],
       awards: [],
       publications: [],
@@ -204,28 +212,6 @@ export const generateWithAI = asyncHandler(async (req: AuthRequest, res: Respons
   await trackEvent("aiRequests");
 
   // The client applies suggestions it receives; nothing is written to the CV here.
-  res.json({ success: true, data: result });
-});
-
-export const tailorResumeWithAI = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const user = await User.findById(req.user!.userId);
-  if (!user) throw new ApiError(404, "User not found");
-  await checkAiLimit(user);
-
-  const resumeId = req.body.resumeId as string | undefined;
-  const resume = resumeId ? await Resume.findOne({ _id: resumeId, userId: user._id }) : null;
-  if (resumeId && !resume) throw new ApiError(404, "Resume not found");
-
-  const cvText = cvToText(req.body.content ?? resume?.content);
-  if (!cvText.trim()) throw new ApiError(400, "Add some CV content before tailoring it to a job.");
-
-  const language = normalizeLanguage(req.body.language || user.language);
-  const result = await geminiService.tailorResume(cvText, req.body.jobDescription, language);
-
-  await incrementAiUsage(user);
-  await trackEvent("aiRequests");
-
-  // Suggestions are returned for the user to approve; the saved CV is not changed.
   res.json({ success: true, data: result });
 });
 
@@ -392,6 +378,62 @@ export const addExperience = asyncHandler(async (req: AuthRequest, res: Response
   res.json({ success: true, data: resume });
 });
 
+const BANGLA = /[ঀ-৿]/g;
+
+/**
+ * Parses CV text with the AI and writes it into an existing CV (replacing its
+ * content) or a new one. Shared by file upload and pasted text (e.g. LinkedIn).
+ */
+const importCvText = async (
+  user: IUser,
+  input: { text: string; resumeId?: string; title: string; uploadFields?: Record<string, unknown> }
+) => {
+  const resumeId = input.resumeId;
+  if (resumeId && !/^[a-f\d]{24}$/i.test(resumeId)) throw new ApiError(400, "Invalid id");
+  if (!resumeId) await checkResumeLimit(user, await Resume.countDocuments({ userId: user._id }));
+  await checkAiLimit(user);
+
+  const parsedContent = normalizeParsedResumeContent(await geminiService.parseResume(input.text));
+  await incrementAiUsage(user);
+  await trackEvent("aiRequests");
+
+  const fields = { content: parsedContent, uploadedResumeText: input.text, uploadedAt: new Date(), ...input.uploadFields };
+  if (resumeId) {
+    const resume = await Resume.findOneAndUpdate({ _id: resumeId, userId: user._id }, fields, { new: true });
+    if (!resume) throw new ApiError(404, "Resume not found");
+    return resume;
+  }
+
+  // Mostly-Bangla source text becomes a Bangla CV (headings, dates)
+  const banglaShare = (input.text.match(BANGLA)?.length ?? 0) / Math.max(1, input.text.replace(/\s/g, "").length);
+  const resume = await Resume.create({
+    userId: user._id,
+    title: input.title,
+    slug: generateUniqueSlug(input.title),
+    templateId: "modern-ats",
+    format: "ats",
+    language: banglaShare > 0.3 ? "bn" : normalizeLanguage(user.language || "en"),
+    sectionOrder: DEFAULT_SECTION_ORDER,
+    ...fields,
+  });
+  user.usage.resumesCreated += 1;
+  await user.save();
+  await trackEvent("resumesUploaded");
+  return resume;
+};
+
+export const importFromText = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const user = await User.findById(req.user!.userId);
+  if (!user) throw new ApiError(404, "User not found");
+  const resume = await importCvText(user, {
+    text: req.body.text,
+    resumeId: req.body.resumeId,
+    title: "Imported CV",
+    uploadFields: { uploadedFileName: null, uploadedFileUrl: null, uploadedFilePath: null },
+  });
+  res.json({ success: true, data: { resumeId: resume._id, title: resume.title, content: resume.content } });
+});
+
 export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.file) throw new ApiError(400, "No file uploaded");
 
@@ -400,8 +442,6 @@ export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: R
   await checkAiLimit(user);
 
   const resumeText = await extractCvText(req.file.buffer, req.file.originalname, req.file.mimetype);
-  const parsedContent = normalizeParsedResumeContent(await geminiService.parseResume(resumeText));
-  await incrementAiUsage(user);
 
   // Keeping the original file is optional: it needs Cloudinary
   const stored = await uploadBuffer(req.file.buffer, "aicvbuilderbd/resumes", "raw", {
@@ -414,44 +454,18 @@ export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: R
     return null;
   });
 
-  const uploadFields = {
-    uploadedResumeText: resumeText,
-    uploadedFileName: req.file.originalname,
-    uploadedFilePath: stored?.publicId ?? null,
-    uploadedFileUrl: stored?.url ?? null,
-    uploadedFileMimeType: req.file.mimetype,
-    uploadedFileSize: req.file.size,
-    uploadedAt: new Date(),
-  };
-
-  const resumeId = req.body.resumeId as string | undefined;
-  let resume;
-  if (resumeId) {
-    if (!/^[a-fd]{24}$/i.test(resumeId)) throw new ApiError(400, "Invalid id");
-    resume = await Resume.findOneAndUpdate(
-      { _id: resumeId, userId: user._id },
-      { content: parsedContent, ...uploadFields },
-      { new: true }
-    );
-    if (!resume) throw new ApiError(404, "Resume not found");
-  } else {
-    const count = await Resume.countDocuments({ userId: user._id });
-    await checkResumeLimit(user, count);
-    const titleFromFile = req.file.originalname.replace(/.(pdf|docx)$/i, "").slice(0, 50) || "Imported CV";
-    resume = await Resume.create({
-      userId: user._id,
-      title: titleFromFile,
-      slug: generateUniqueSlug(titleFromFile),
-      templateId: "modern-ats",
-      format: "ats",
-      language: normalizeLanguage(user.language || "en"),
-      content: parsedContent,
-      ...uploadFields,
-    });
-    user.usage.resumesCreated += 1;
-    await user.save();
-    await trackEvent("resumesUploaded");
-  }
+  const resume = await importCvText(user, {
+    text: resumeText,
+    resumeId: req.body.resumeId as string | undefined,
+    title: req.file.originalname.replace(/\.(pdf|docx)$/i, "").slice(0, 50) || "Imported CV",
+    uploadFields: {
+      uploadedFileName: req.file.originalname,
+      uploadedFilePath: stored?.publicId ?? null,
+      uploadedFileUrl: stored?.url ?? null,
+      uploadedFileMimeType: req.file.mimetype,
+      uploadedFileSize: req.file.size,
+    },
+  });
 
   res.json({
     success: true,

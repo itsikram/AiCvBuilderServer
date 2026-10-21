@@ -191,11 +191,47 @@ export const generateResumeSchema = z.object({
   resumeId: objectId.optional(),
 });
 
-export const tailorResumeSchema = z.object({
+/** AI tasks work on the editor's current (possibly unsaved) content, or a saved CV by id. */
+export const aiContentSchema = z.object({
   resumeId: objectId.optional(),
-  jobDescription: z.string().trim().min(20).max(12000),
-  language: language.optional().default("en"),
   content: resumeContentSchema.partial().optional(),
+  language: language.optional().default("en"),
+});
+
+const tone = z.enum(["formal", "confident", "friendly"]).optional().default("formal");
+
+export const tailorResumeSchema = aiContentSchema.extend({
+  jobDescription: z.string().trim().min(20, "Paste the full job post (at least a few lines)").max(12000),
+});
+
+export const writeSummarySchema = aiContentSchema.extend({
+  kind: z.enum(["summary", "objective"]),
+  jobTitle: z.string().trim().max(120).optional().default(""),
+  tone,
+});
+
+export const rewriteBulletsSchema = z.object({
+  position: z.string().trim().max(200).optional().default(""),
+  company: z.string().trim().max(200).optional().default(""),
+  bullets: z.array(z.string().max(1000)).max(20).optional().default([]),
+  jobTitle: z.string().trim().max(120).optional().default(""),
+  tone,
+  language: language.optional().default("en"),
+});
+
+export const suggestSkillsSchema = z.object({
+  jobTitle: z.string().trim().min(2, "Enter a job title").max(120),
+  currentSkills: z.array(z.string().max(100)).max(100).optional().default([]),
+  language: language.optional().default("en"),
+});
+
+export const grammarSchema = aiContentSchema;
+
+export const translateResumeSchema = z.object({ targetLanguage: language });
+
+export const importTextSchema = z.object({
+  text: z.string().trim().min(80, "Paste more of your CV or LinkedIn profile (at least a few lines)").max(30000),
+  resumeId: objectId.optional(),
 });
 
 export const improveResumeSchema = z.object({

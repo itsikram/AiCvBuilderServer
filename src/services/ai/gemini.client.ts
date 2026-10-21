@@ -49,7 +49,8 @@ const clientCache = new Map<string, GoogleGenAI>();
 const clientFor = (key: string) => {
   let client = clientCache.get(key);
   if (!client) {
-    client = new GoogleGenAI({ apiKey: key });
+    // GEMINI_BASE_URL is optional (an API gateway/proxy, or a local stub in tests)
+    client = new GoogleGenAI({ apiKey: key, ...(config.gemini.baseUrl ? { httpOptions: { baseUrl: config.gemini.baseUrl } } : {}) });
     clientCache.set(key, client);
   }
   return client;
@@ -103,7 +104,9 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
       // Every key was tried or is cooling down; wait for the soonest one if it's short
       triedKeys.clear();
       const wait = geminiKeyManager.msUntilAvailable();
-      if (!Number.isFinite(wait) || wait > 15_000) break;
+      // Every key is rejected (invalid/leaked): retrying later won't help
+      if (!Number.isFinite(wait)) throw new ApiError(503, userMessages.notConfigured);
+      if (wait > 15_000) break;
       await sleep(wait + Math.random() * 250);
       picked = geminiKeyManager.next(triedKeys);
       if (!picked) break;

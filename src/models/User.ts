@@ -30,6 +30,9 @@ export interface IUser extends Document {
     resumesCreated: number;
     aiRequestsThisMonth: number;
     lastAiReset: Date;
+    /** AI requests made on aiDayKey, a Bangladesh-time date (YYYY-MM-DD) */
+    aiRequestsToday: number;
+    aiDayKey?: string;
   };
   referralCode: string;
   referredBy?: mongoose.Types.ObjectId;
@@ -68,6 +71,8 @@ const userSchema = new Schema<IUser>(
       resumesCreated: { type: Number, default: 0 },
       aiRequestsThisMonth: { type: Number, default: 0 },
       lastAiReset: { type: Date, default: Date.now },
+      aiRequestsToday: { type: Number, default: 0 },
+      aiDayKey: String,
     },
     referralCode: { type: String, unique: true },
     referredBy: { type: Schema.Types.ObjectId, ref: "User" },

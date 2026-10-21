@@ -164,6 +164,31 @@ export interface IResumeContent {
   customSections: { title: string; content: string }[];
 }
 
+/**
+ * Section ids in display order, in the order a Bangladeshi CV usually follows. The
+ * client renders sections missing from a CV's sectionOrder after the listed ones.
+ */
+export const DEFAULT_SECTION_ORDER = [
+  "objective",
+  "summary",
+  "experience",
+  "education",
+  "training",
+  "skills",
+  "projects",
+  "certifications",
+  "languages",
+  "awards",
+  "publications",
+  "volunteer",
+  "courses",
+  "memberships",
+  "interests",
+  "custom",
+  "personalDetails",
+  "references",
+];
+
 export interface IResume extends Document {
   userId: mongoose.Types.ObjectId;
   title: string;
@@ -385,7 +410,7 @@ const resumeSchema = new Schema<IResume>(
   },
     sectionOrder: {
       type: [String],
-      default: ["summary", "experience", "education", "skills", "projects"],
+      default: () => [...DEFAULT_SECTION_ORDER],
     },
     lastExportedAt: Date,
     viewCount: { type: Number, default: 0 },
