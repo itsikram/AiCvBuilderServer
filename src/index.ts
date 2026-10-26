@@ -56,7 +56,7 @@ const connectWithRetry = async (): Promise<void> => {
   try {
     await connectDatabase();
   } catch (error) {
-    console.error("MySQL connection error (retrying in 30s):", error);
+    console.error("MySQL connection error (retrying in 30s):", error instanceof Error ? error.message : error);
     setTimeout(connectWithRetry, 30_000);
   }
 };
