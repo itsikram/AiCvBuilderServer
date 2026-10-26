@@ -150,7 +150,7 @@ export const resumeContentSchema = z.object({
 
 export type ResumeContentInput = z.infer<typeof resumeContentSchema>;
 
-const objectId = z.string().regex(/^[a-f\d]{24}$/i, "Invalid id");
+const objectId = z.string().regex(/^[A-Za-z0-9_-]{1,36}$/, "Invalid id");
 const language = z.enum(["en", "bn"]);
 const format = z.enum(["international", "bangladeshi", "ats"]);
 const templateSlug = z.string().trim().min(1).max(80).regex(/^[a-z0-9-]+$/, "Invalid template");

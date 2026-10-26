@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { verifyAccessToken, TokenPayload } from "../utils/tokens.js";
-import { User } from "../models/User.js";
+import { prisma } from "../config/database.js";
 import { ApiError } from "../utils/ApiError.js";
 
 export interface AuthRequest extends Request {
@@ -21,7 +21,7 @@ export const authenticate = async (
     if (!token) throw new ApiError(401, "Authentication required");
 
     const payload = verifyAccessToken(token);
-    const user = await User.findById(payload.userId).select("role email").lean();
+    const user = await prisma.user.findUnique({ where: { id: payload.userId }, select: { role: true, email: true } });
     if (!user) throw new ApiError(401, "User not found");
 
     // Role comes from the database, so promotions and demotions apply immediately
@@ -67,7 +67,7 @@ export const requireVerifiedEmail = async (
   _res: Response,
   next: NextFunction
 ): Promise<void> => {
-  const user = await User.findById(req.user?.userId);
+  const user = req.user ? await prisma.user.findUnique({ where: { id: req.user.userId }, select: { isEmailVerified: true } }) : null;
   if (!user?.isEmailVerified) {
     next(new ApiError(403, "Please verify your email first"));
     return;

@@ -4,7 +4,6 @@ import helmet from "helmet";
 import morgan from "morgan";
 import compression from "compression";
 import cookieParser from "cookie-parser";
-import mongoSanitize from "express-mongo-sanitize";
 import { config } from "./config/index.js";
 import { connectDatabase } from "./config/database.js";
 import { getRedis } from "./config/redis.js";
@@ -42,7 +41,6 @@ app.use(
   generalLimiter,
   express.json({ limit: "5mb" }),
   express.urlencoded({ extended: true, limit: "5mb" }),
-  mongoSanitize(),
   routes
 );
 app.get("/", (_req, res) => {
@@ -58,13 +56,13 @@ const connectWithRetry = async (): Promise<void> => {
   try {
     await connectDatabase();
   } catch (error) {
-    console.error("MongoDB connection error (retrying in 30s):", error);
+    console.error("MySQL connection error (retrying in 30s):", error);
     setTimeout(connectWithRetry, 30_000);
   }
 };
 
 const start = async () => {
-  // Listen first so Passenger's startup timeout never depends on how fast MongoDB answers
+  // Listen first so Passenger's startup timeout never depends on how fast MySQL answers
   app.listen(config.port, () => {
     console.log(`${config.app.name} API running on port ${config.port}`);
   });

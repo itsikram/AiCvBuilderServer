@@ -1,4 +1,4 @@
-import { AdminSetting } from "../models/AdminSetting.js";
+import { prisma } from "../config/database.js";
 
 // Admin-editable settings (Admin -> Settings) are read on hot paths such as every AI
 // request, so they are cached in process memory for a minute. Updates through the
@@ -9,7 +9,7 @@ let cache: { loadedAt: number; values: Map<string, string> } | null = null;
 let loading: Promise<Map<string, string>> | null = null;
 
 const load = async (): Promise<Map<string, string>> => {
-  const rows = await AdminSetting.find().select("key value").lean();
+  const rows = await prisma.adminSetting.findMany({ select: { key: true, value: true } });
   return new Map(rows.map((row) => [row.key, row.value]));
 };
 

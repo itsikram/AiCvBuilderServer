@@ -1,101 +1,56 @@
-import mongoose, { Document, Schema } from "mongoose";
 import bcrypt from "bcryptjs";
-import { normalizeLanguage } from "../utils/language.js";
+import type { User } from "../generated/prisma/client.js";
 
-export type UserRole = "user" | "admin";
-export type SubscriptionPlan = "free" | "premium";
-export type SubscriptionStatus = "active" | "cancelled" | "expired" | "trial";
-export type Language = "en" | "bn";
+export type { User };
+export type UserRole = User["role"];
+export type Language = User["language"];
 
-export interface IUser extends Document {
-  name: string;
-  email: string;
-  password?: string;
-  avatar?: string;
-  googleId?: string;
-  role: UserRole;
-  language: Language;
-  isEmailVerified: boolean;
-  emailVerificationToken?: string;
-  emailVerificationExpires?: Date;
-  passwordResetToken?: string;
-  passwordResetExpires?: Date;
-  subscription: {
-    plan: SubscriptionPlan;
-    status: SubscriptionStatus;
-    expiresAt?: Date;
-    stripeCustomerId?: string;
-  };
-  usage: {
-    resumesCreated: number;
-    aiRequestsThisMonth: number;
-    lastAiReset: Date;
-    /** AI requests made on aiDayKey, a Bangladesh-time date (YYYY-MM-DD) */
-    aiRequestsToday: number;
-    aiDayKey?: string;
-  };
-  referralCode: string;
-  referredBy?: mongoose.Types.ObjectId;
-  referralCount: number;
-  theme: "light" | "dark" | "system";
-  lastLoginAt?: Date;
-  createdAt: Date;
-  updatedAt: Date;
-  comparePassword(candidate: string): Promise<boolean>;
-}
+export const hashPassword = (password: string) => bcrypt.hash(password, 12);
 
-const userSchema = new Schema<IUser>(
-  {
-    name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    password: { type: String, select: false },
-    avatar: String,
-    googleId: { type: String, sparse: true },
-    role: { type: String, enum: ["user", "admin"], default: "user" },
-    language: { type: String, enum: ["en", "bn"], default: "en" },
-    isEmailVerified: { type: Boolean, default: false },
-    emailVerificationToken: String,
-    emailVerificationExpires: Date,
-    passwordResetToken: String,
-    passwordResetExpires: Date,
-    subscription: {
-      plan: { type: String, enum: ["free", "premium"], default: "free" },
-      status: {
-        type: String,
-        enum: ["active", "cancelled", "expired", "trial"],
-        default: "active",
-      },
-      expiresAt: Date,
-    },
-    usage: {
-      resumesCreated: { type: Number, default: 0 },
-      aiRequestsThisMonth: { type: Number, default: 0 },
-      lastAiReset: { type: Date, default: Date.now },
-      aiRequestsToday: { type: Number, default: 0 },
-      aiDayKey: String,
-    },
-    referralCode: { type: String, unique: true },
-    referredBy: { type: Schema.Types.ObjectId, ref: "User" },
-    referralCount: { type: Number, default: 0 },
-    theme: { type: String, enum: ["light", "dark", "system"], default: "system" },
-    lastLoginAt: Date,
-  },
-  { timestamps: true }
-);
-
-userSchema.pre("save", async function (next) {
-  this.language = normalizeLanguage(this.language);
-
-  if (!this.isModified("password") || !this.password) return next();
-  this.password = await bcrypt.hash(this.password, 12);
-  next();
-});
-
-userSchema.methods.comparePassword = async function (candidate: string): Promise<boolean> {
-  if (!this.password) return false;
-  return bcrypt.compare(candidate, this.password);
+export const comparePassword = async (user: Pick<User, "password">, candidate: string): Promise<boolean> => {
+  if (!user.password) return false;
+  return bcrypt.compare(candidate, user.password);
 };
 
-// email and referralCode are indexed through their unique: true options
+/** The subscription fields in the nested shape the API has always returned */
+export const subscriptionOf = (user: User) => ({
+  plan: user.subscriptionPlan,
+  status: user.subscriptionStatus,
+  expiresAt: user.subscriptionExpiresAt ?? undefined,
+});
 
-export const User = mongoose.model<IUser>("User", userSchema);
+export const usageOf = (user: User) => ({
+  resumesCreated: user.resumesCreated,
+  aiRequestsThisMonth: user.aiRequestsThisMonth,
+  lastAiReset: user.lastAiReset,
+  aiRequestsToday: user.aiRequestsToday,
+  aiDayKey: user.aiDayKey ?? undefined,
+});
+
+/** A user for API responses: never includes the password hash or one-time token hashes. */
+export const serializeUser = (user: User) => {
+  const {
+    password: _password,
+    emailVerificationToken: _verificationToken,
+    emailVerificationExpires: _verificationExpires,
+    passwordResetToken: _resetToken,
+    passwordResetExpires: _resetExpires,
+    subscriptionPlan: _plan,
+    subscriptionStatus: _status,
+    subscriptionExpiresAt: _expiresAt,
+    resumesCreated: _resumesCreated,
+    aiRequestsThisMonth: _aiMonth,
+    lastAiReset: _lastAiReset,
+    aiRequestsToday: _aiToday,
+    aiDayKey: _aiDayKey,
+    referredById,
+    ...rest
+  } = user;
+  return {
+    _id: user.id,
+    ...rest,
+    subscription: subscriptionOf(user),
+    usage: usageOf(user),
+    referredBy: referredById ?? undefined,
+  };
+};

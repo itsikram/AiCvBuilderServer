@@ -1,17 +1,18 @@
 version: "3.9"
 
 services:
-  mongodb:
-    image: mongo:7
-    container_name: aicvbuilderbd-mongo
+  mysql:
+    image: mysql:8.4
+    container_name: aicvbuilderbd-mysql
     restart: unless-stopped
     ports:
-      - "27017:27017"
+      - "3306:3306"
     volumes:
-      - mongo_data:/data/db
+      - mysql_data:/var/lib/mysql
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: changeme
+      MYSQL_DATABASE: aicvbuilderbd
+      MYSQL_ROOT_PASSWORD: changeme
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
 
   redis:
     image: redis:7-alpine
@@ -32,13 +33,15 @@ services:
       - "5000:5000"
     env_file:
       - ./.env
+    environment:
+      DATABASE_URL: mysql://root:changeme@mysql:3306/aicvbuilderbd
     depends_on:
-      - mongodb
+      - mysql
       - redis
     volumes:
       - ./:/app
       - /app/node_modules
 
 volumes:
-  mongo_data:
+  mysql_data:
   redis_data:

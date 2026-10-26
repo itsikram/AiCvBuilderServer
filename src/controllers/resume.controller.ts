@@ -3,7 +3,17 @@ import fs from "fs";
 import { createHash } from "crypto";
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
-import { DEFAULT_SECTION_ORDER, IResumeContent, Resume } from "../models/Resume.js";
+import { prisma } from "../config/database.js";
+import {
+  DEFAULT_SECTION_ORDER,
+  DEFAULT_THEME,
+  IResumeContent,
+  asJson,
+  serializeResume,
+  withContentDefaults,
+} from "../models/Resume.js";
+import type { User } from "../models/User.js";
+import type { Prisma } from "../generated/prisma/client.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
@@ -18,8 +28,6 @@ import {
   checkFeatureAccess,
   getUserLimits,
 } from "../services/subscription.service.js";
-import { IUser, User } from "../models/User.js";
-import { Template } from "../models/Template.js";
 import { generateResumePDF } from "../services/pdf.service.js";
 import { trackEvent } from "../services/analytics.service.js";
 import { cacheGet, cacheSet } from "../config/redis.js";
@@ -71,8 +79,23 @@ const normalizeParsedResumeContent = (parsed: ParsedCv): IResumeContent => {
   };
 };
 
-const resolveTemplateForUser = async (templateId: string, user: IUser) => {
-  const template = await Template.findOne({ slug: templateId, isActive: true });
+const loadUser = async (userId: string) => {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new ApiError(404, "User not found");
+  return user;
+};
+
+/** A CV owned by the caller, or 404 */
+const findOwnResume = async (id: string, userId: string) => {
+  const resume = await prisma.resume.findFirst({ where: { id, userId } });
+  if (!resume) throw new ApiError(404, "Resume not found");
+  return resume;
+};
+
+const countResumes = (userId: string) => prisma.resume.count({ where: { userId } });
+
+const resolveTemplateForUser = async (templateId: string, user: User) => {
+  const template = await prisma.template.findFirst({ where: { slug: templateId, isActive: true } });
   if (!template) throw new ApiError(404, "Template not found");
 
   const limits = await getUserLimits(user);
@@ -83,96 +106,89 @@ const resolveTemplateForUser = async (templateId: string, user: IUser) => {
   return template;
 };
 
+/** Counts a newly created CV against the user's lifetime total */
+const countCreatedResume = (userId: string) =>
+  prisma.user.update({ where: { id: userId }, data: { resumesCreated: { increment: 1 } } });
+
 export const getResumes = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const resumes = await Resume.find({ userId: req.user!.userId })
-    .sort({ updatedAt: -1 })
-    .select("-__v");
-  res.json({ success: true, data: resumes });
+  const resumes = await prisma.resume.findMany({
+    where: { userId: req.user!.userId },
+    orderBy: { updatedAt: "desc" },
+  });
+  res.json({ success: true, data: resumes.map(serializeResume) });
 });
 
 export const getResume = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const resume = await Resume.findOne({ _id: req.params.id, userId: req.user!.userId });
-  if (!resume) throw new ApiError(404, "Resume not found");
-  res.json({ success: true, data: resume });
+  const resume = await findOwnResume(String(req.params.id), req.user!.userId);
+  res.json({ success: true, data: serializeResume(resume) });
 });
 
 export const createResume = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const user = await User.findById(req.user!.userId);
-  if (!user) throw new ApiError(404, "User not found");
-
-  const count = await Resume.countDocuments({ userId: user._id });
-  await checkResumeLimit(user, count);
+  const user = await loadUser(req.user!.userId);
+  await checkResumeLimit(user, await countResumes(user.id));
 
   const { title, templateId, format, language } = req.body;
   const template = await resolveTemplateForUser(templateId || "modern-ats", user);
   const resolvedLanguage = normalizeLanguage(language || user.language);
-  const resume = await Resume.create({
-    userId: user._id,
-    title,
-    slug: generateUniqueSlug(title),
-    templateId: template.slug,
-    format: format || "ats",
-    language: resolvedLanguage,
-    theme: template.defaultTheme || {},
-    content: {
-      personalInfo: {
-        fullName: user.name,
-        email: user.email,
-        phone: "",
-        location: "Dhaka, Bangladesh",
-        summary: "",
-      },
-      careerObjective: "",
-      personalDetails: { nationality: resolvedLanguage === "bn" ? "বাংলাদেশী" : "Bangladeshi" },
-      experience: [],
-      trainings: [],
-      education: [],
-      projects: [],
-      skills: [],
-      languages:
-        resolvedLanguage === "bn"
-          ? [
-              { id: uuidv4(), name: "বাংলা", proficiency: "native" },
-              { id: uuidv4(), name: "ইংরেজি", proficiency: "fluent" },
-            ]
-          : [
-              { id: uuidv4(), name: "Bangla", proficiency: "native" },
-              { id: uuidv4(), name: "English", proficiency: "fluent" },
-            ],
-      certifications: [],
-      awards: [],
-      publications: [],
-      volunteerExperience: [],
-      references: [],
-      interests: [],
-      courses: [],
-      memberships: [],
-      customSections: [],
+  const content = withContentDefaults({
+    personalInfo: {
+      fullName: user.name,
+      email: user.email,
+      phone: "",
+      location: "Dhaka, Bangladesh",
+      summary: "",
+    },
+    careerObjective: "",
+    personalDetails: { nationality: resolvedLanguage === "bn" ? "বাংলাদেশী" : "Bangladeshi" },
+    languages:
+      resolvedLanguage === "bn"
+        ? [
+            { id: uuidv4(), name: "বাংলা", proficiency: "native" },
+            { id: uuidv4(), name: "ইংরেজি", proficiency: "fluent" },
+          ]
+        : [
+            { id: uuidv4(), name: "Bangla", proficiency: "native" },
+            { id: uuidv4(), name: "English", proficiency: "fluent" },
+          ],
+  });
+  const resume = await prisma.resume.create({
+    data: {
+      userId: user.id,
+      title,
+      slug: generateUniqueSlug(title),
+      templateId: template.slug,
+      format: format || "ats",
+      language: resolvedLanguage,
+      theme: asJson(template.defaultTheme ?? {}),
+      sectionOrder: asJson(DEFAULT_SECTION_ORDER),
+      content: asJson(content),
     },
   });
 
-  user.usage.resumesCreated += 1;
-  await user.save();
+  await countCreatedResume(user.id);
   await trackEvent("resumesCreated");
 
-  res.status(201).json({ success: true, data: resume });
+  res.status(201).json({ success: true, data: serializeResume(resume) });
 });
 
 export const updateResume = asyncHandler(async (req: AuthRequest, res: Response) => {
   // Only whitelisted, validated fields reach the database (validate() replaced req.body)
-  const update = { ...(req.body as UpdateResumeInput) };
-  if (update.templateId) {
-    const user = await User.findById(req.user!.userId);
-    if (!user) throw new ApiError(404, "User not found");
-    update.templateId = (await resolveTemplateForUser(update.templateId, user)).slug;
+  const { content, theme, sectionOrder, ...fields } = req.body as UpdateResumeInput;
+  await findOwnResume(String(req.params.id), req.user!.userId);
+  if (fields.templateId) {
+    const user = await loadUser(req.user!.userId);
+    fields.templateId = (await resolveTemplateForUser(fields.templateId, user)).slug;
   }
-  const resume = await Resume.findOneAndUpdate(
-    { _id: req.params.id, userId: req.user!.userId },
-    { $set: update },
-    { new: true, runValidators: true }
-  );
-  if (!resume) throw new ApiError(404, "Resume not found");
-  res.json({ success: true, data: resume });
+  const resume = await prisma.resume.update({
+    where: { id: String(req.params.id) },
+    data: {
+      ...fields,
+      ...(content !== undefined && { content: asJson(withContentDefaults(content as Partial<IResumeContent>)) }),
+      ...(theme !== undefined && { theme: asJson(theme) }),
+      ...(sectionOrder !== undefined && { sectionOrder: asJson(sectionOrder) }),
+    },
+  });
+  res.json({ success: true, data: serializeResume(resume) });
 });
 
 export const updateTemplate = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -180,30 +196,24 @@ export const updateTemplate = asyncHandler(async (req: AuthRequest, res: Respons
   if (!templateId) {
     throw new ApiError(400, "templateId is required");
   }
-  const user = await User.findById(req.user!.userId);
-  if (!user) throw new ApiError(404, "User not found");
+  const user = await loadUser(req.user!.userId);
   const template = await resolveTemplateForUser(templateId, user);
-  const resume = await Resume.findOneAndUpdate(
-    { _id: req.params.id, userId: req.user!.userId },
-    { $set: { templateId: template.slug, theme: template.defaultTheme || {} } },
-    { new: true }
-  );
-  if (!resume) throw new ApiError(404, "Resume not found");
-  res.json({ success: true, data: resume });
+  await findOwnResume(String(req.params.id), user.id);
+  const resume = await prisma.resume.update({
+    where: { id: String(req.params.id) },
+    data: { templateId: template.slug, theme: asJson(template.defaultTheme ?? {}) },
+  });
+  res.json({ success: true, data: serializeResume(resume) });
 });
 
 export const deleteResume = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const resume = await Resume.findOneAndDelete({
-    _id: req.params.id,
-    userId: req.user!.userId,
-  });
-  if (!resume) throw new ApiError(404, "Resume not found");
+  const { count } = await prisma.resume.deleteMany({ where: { id: String(req.params.id), userId: req.user!.userId } });
+  if (!count) throw new ApiError(404, "Resume not found");
   res.json({ success: true, message: "Resume deleted" });
 });
 
 export const generateWithAI = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const user = await User.findById(req.user!.userId);
-  if (!user) throw new ApiError(404, "User not found");
+  const user = await loadUser(req.user!.userId);
   await checkAiLimit(user);
 
   const language = normalizeLanguage(req.body.language || user.language);
@@ -216,8 +226,7 @@ export const generateWithAI = asyncHandler(async (req: AuthRequest, res: Respons
 });
 
 export const improveWithAI = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const user = await User.findById(req.user!.userId);
-  if (!user) throw new ApiError(404, "User not found");
+  const user = await loadUser(req.user!.userId);
   await checkFeatureAccess(user, "aiOptimization");
   await checkAiLimit(user);
 
@@ -232,18 +241,17 @@ export const improveWithAI = asyncHandler(async (req: AuthRequest, res: Response
 
   if (req.body.resumeId) {
     // Scoped to the caller: users can only annotate their own CVs
-    await Resume.updateOne(
-      { _id: req.body.resumeId, userId: user._id },
-      { atsScore: result.atsScore, atsFeedback: result.suggestions }
-    );
+    await prisma.resume.updateMany({
+      where: { id: req.body.resumeId, userId: user.id },
+      data: { atsScore: Math.round(result.atsScore), atsFeedback: asJson(result.suggestions) },
+    });
   }
 
   res.json({ success: true, data: result });
 });
 
 export const checkATS = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const user = await User.findById(req.user!.userId);
-  if (!user) throw new ApiError(404, "User not found");
+  const user = await loadUser(req.user!.userId);
   await checkFeatureAccess(user, "atsChecker");
   await checkAiLimit(user);
 
@@ -269,21 +277,19 @@ export const checkATS = asyncHandler(async (req: AuthRequest, res: Response) => 
 });
 
 export const exportPDF = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const resume = await Resume.findOne({ _id: req.params.id, userId: req.user!.userId });
-  if (!resume) throw new ApiError(404, "Resume not found");
+  const resume = await findOwnResume(String(req.params.id), req.user!.userId);
 
-  const user = await User.findById(req.user!.userId);
+  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   const limits = user ? await getUserLimits(user) : { watermarkPdf: true };
 
-  const pdfBuffer = await generateResumePDF(resume.content, {
+  const pdfBuffer = await generateResumePDF(resume.content as unknown as IResumeContent, {
     watermark: limits.watermarkPdf,
     format: resume.format,
     templateId: resume.templateId,
-    theme: resume.theme,
+    theme: resume.theme as Record<string, string>,
   });
 
-  resume.lastExportedAt = new Date();
-  await resume.save();
+  await prisma.resume.update({ where: { id: resume.id }, data: { lastExportedAt: new Date() } });
   await trackEvent("pdfExports");
 
   res.setHeader("Content-Type", "application/pdf");
@@ -295,14 +301,16 @@ export const exportPDF = asyncHandler(async (req: AuthRequest, res: Response) =>
 });
 
 export const togglePublic = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const resume = await Resume.findOne({ _id: req.params.id, userId: req.user!.userId });
-  if (!resume) throw new ApiError(404, "Resume not found");
+  const current = await findOwnResume(String(req.params.id), req.user!.userId);
 
-  resume.isPublic = !resume.isPublic;
-  if (resume.isPublic && !resume.publicSlug) {
-    resume.publicSlug = generateUniqueSlug(resume.title);
-  }
-  await resume.save();
+  const isPublic = !current.isPublic;
+  const resume = await prisma.resume.update({
+    where: { id: current.id },
+    data: {
+      isPublic,
+      ...(isPublic && !current.publicSlug && { publicSlug: generateUniqueSlug(current.title) }),
+    },
+  });
 
   res.json({
     success: true,
@@ -316,11 +324,10 @@ export const togglePublic = asyncHandler(async (req: AuthRequest, res: Response)
 });
 
 export const getPublicResume = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const resume = await Resume.findOne({ publicSlug: req.params.slug, isPublic: true });
-  if (!resume) throw new ApiError(404, "Resume not found");
+  const found = await prisma.resume.findFirst({ where: { publicSlug: String(req.params.slug), isPublic: true }, select: { id: true } });
+  if (!found) throw new ApiError(404, "Resume not found");
 
-  resume.viewCount += 1;
-  await resume.save();
+  const resume = await prisma.resume.update({ where: { id: found.id }, data: { viewCount: { increment: 1 } } });
 
   res.json({
     success: true,
@@ -335,110 +342,116 @@ export const getPublicResume = asyncHandler(async (req: AuthRequest, res: Respon
 });
 
 export const duplicateResume = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const original = await Resume.findOne({ _id: req.params.id, userId: req.user!.userId });
-  if (!original) throw new ApiError(404, "Resume not found");
+  const original = await findOwnResume(String(req.params.id), req.user!.userId);
 
-  const user = await User.findById(req.user!.userId);
-  if (!user) throw new ApiError(404, "User not found");
-  const count = await Resume.countDocuments({ userId: user._id });
-  await checkResumeLimit(user, count);
+  const user = await loadUser(req.user!.userId);
+  await checkResumeLimit(user, await countResumes(user.id));
 
-  const copy = await Resume.create({
-    userId: user._id,
-    title: `${original.title} (Copy)`,
-    slug: generateUniqueSlug(`${original.title}-copy`),
-    templateId: original.templateId,
-    format: original.format,
-    content: original.content,
-    language: normalizeLanguage(original.language),
-    theme: original.theme,
-    sectionOrder: original.sectionOrder,
+  const copy = await prisma.resume.create({
+    data: {
+      userId: user.id,
+      title: `${original.title} (Copy)`,
+      slug: generateUniqueSlug(`${original.title}-copy`),
+      templateId: original.templateId,
+      format: original.format,
+      content: asJson(original.content),
+      language: normalizeLanguage(original.language),
+      theme: asJson(original.theme),
+      sectionOrder: asJson(original.sectionOrder),
+    },
   });
 
-  res.status(201).json({ success: true, data: copy });
+  res.status(201).json({ success: true, data: serializeResume(copy) });
 });
 
 export const reorderSections = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { sectionOrder } = req.body;
-  const resume = await Resume.findOneAndUpdate(
-    { _id: req.params.id, userId: req.user!.userId },
-    { sectionOrder },
-    { new: true }
-  );
-  if (!resume) throw new ApiError(404, "Resume not found");
-  res.json({ success: true, data: resume });
+  await findOwnResume(String(req.params.id), req.user!.userId);
+  const resume = await prisma.resume.update({
+    where: { id: String(req.params.id) },
+    data: { sectionOrder: asJson(sectionOrder) },
+  });
+  res.json({ success: true, data: serializeResume(resume) });
 });
 
 export const addExperience = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const resume = await Resume.findOne({ _id: req.params.id, userId: req.user!.userId });
-  if (!resume) throw new ApiError(404, "Resume not found");
+  const current = await findOwnResume(String(req.params.id), req.user!.userId);
   const exp = req.body as ResumeContentInput["experience"][number];
-  resume.content.experience.push({ ...exp, id: uuidv4(), bullets: exp.bullets || [] });
-  await resume.save();
-  res.json({ success: true, data: resume });
+  const content = withContentDefaults(current.content as unknown as IResumeContent);
+  content.experience.push({ ...exp, id: uuidv4(), bullets: exp.bullets || [] } as IResumeContent["experience"][number]);
+  const resume = await prisma.resume.update({ where: { id: current.id }, data: { content: asJson(content) } });
+  res.json({ success: true, data: serializeResume(resume) });
 });
 
 const BANGLA = /[ঀ-৿]/g;
+
+type UploadFields = Pick<
+  Prisma.ResumeUncheckedCreateInput,
+  "uploadedFileName" | "uploadedFilePath" | "uploadedFileUrl" | "uploadedFileMimeType" | "uploadedFileSize"
+>;
 
 /**
  * Parses CV text with the AI and writes it into an existing CV (replacing its
  * content) or a new one. Shared by file upload and pasted text (e.g. LinkedIn).
  */
 const importCvText = async (
-  user: IUser,
-  input: { text: string; resumeId?: string; title: string; uploadFields?: Record<string, unknown> }
+  user: User,
+  input: { text: string; resumeId?: string; title: string; uploadFields?: UploadFields }
 ) => {
   const resumeId = input.resumeId;
-  if (resumeId && !/^[a-f\d]{24}$/i.test(resumeId)) throw new ApiError(400, "Invalid id");
-  if (!resumeId) await checkResumeLimit(user, await Resume.countDocuments({ userId: user._id }));
+  if (resumeId) await findOwnResume(resumeId, user.id);
+  else await checkResumeLimit(user, await countResumes(user.id));
   await checkAiLimit(user);
 
-  const parsedContent = normalizeParsedResumeContent(await geminiService.parseResume(input.text));
+  const parsedContent = withContentDefaults(normalizeParsedResumeContent(await geminiService.parseResume(input.text)));
   await incrementAiUsage(user);
   await trackEvent("aiRequests");
 
-  const fields = { content: parsedContent, uploadedResumeText: input.text, uploadedAt: new Date(), ...input.uploadFields };
+  const fields = {
+    content: asJson(parsedContent),
+    uploadedResumeText: input.text,
+    uploadedAt: new Date(),
+    ...input.uploadFields,
+  };
   if (resumeId) {
-    const resume = await Resume.findOneAndUpdate({ _id: resumeId, userId: user._id }, fields, { new: true });
-    if (!resume) throw new ApiError(404, "Resume not found");
-    return resume;
+    return prisma.resume.update({ where: { id: resumeId }, data: fields });
   }
 
   // Mostly-Bangla source text becomes a Bangla CV (headings, dates)
   const banglaShare = (input.text.match(BANGLA)?.length ?? 0) / Math.max(1, input.text.replace(/\s/g, "").length);
-  const resume = await Resume.create({
-    userId: user._id,
-    title: input.title,
-    slug: generateUniqueSlug(input.title),
-    templateId: "modern-ats",
-    format: "ats",
-    language: banglaShare > 0.3 ? "bn" : normalizeLanguage(user.language || "en"),
-    sectionOrder: DEFAULT_SECTION_ORDER,
-    ...fields,
+  const resume = await prisma.resume.create({
+    data: {
+      userId: user.id,
+      title: input.title,
+      slug: generateUniqueSlug(input.title),
+      templateId: "modern-ats",
+      format: "ats",
+      language: banglaShare > 0.3 ? "bn" : normalizeLanguage(user.language || "en"),
+      theme: asJson(DEFAULT_THEME),
+      sectionOrder: asJson(DEFAULT_SECTION_ORDER),
+      ...fields,
+    },
   });
-  user.usage.resumesCreated += 1;
-  await user.save();
+  await countCreatedResume(user.id);
   await trackEvent("resumesUploaded");
   return resume;
 };
 
 export const importFromText = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const user = await User.findById(req.user!.userId);
-  if (!user) throw new ApiError(404, "User not found");
+  const user = await loadUser(req.user!.userId);
   const resume = await importCvText(user, {
     text: req.body.text,
     resumeId: req.body.resumeId,
     title: "Imported CV",
     uploadFields: { uploadedFileName: null, uploadedFileUrl: null, uploadedFilePath: null },
   });
-  res.json({ success: true, data: { resumeId: resume._id, title: resume.title, content: resume.content } });
+  res.json({ success: true, data: { resumeId: resume.id, title: resume.title, content: resume.content } });
 });
 
 export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.file) throw new ApiError(400, "No file uploaded");
 
-  const user = await User.findById(req.user!.userId);
-  if (!user) throw new ApiError(404, "User not found");
+  const user = await loadUser(req.user!.userId);
   await checkAiLimit(user);
 
   const resumeText = await extractCvText(req.file.buffer, req.file.originalname, req.file.mimetype);
@@ -454,9 +467,10 @@ export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: R
     return null;
   });
 
+  const resumeId = typeof req.body.resumeId === "string" && req.body.resumeId ? req.body.resumeId : undefined;
   const resume = await importCvText(user, {
     text: resumeText,
-    resumeId: req.body.resumeId as string | undefined,
+    resumeId,
     title: req.file.originalname.replace(/\.(pdf|docx)$/i, "").slice(0, 50) || "Imported CV",
     uploadFields: {
       uploadedFileName: req.file.originalname,
@@ -470,7 +484,7 @@ export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: R
   res.json({
     success: true,
     data: {
-      resumeId: resume._id,
+      resumeId: resume.id,
       title: resume.title,
       content: resume.content,
       uploadedAt: resume.uploadedAt,
@@ -482,8 +496,7 @@ export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: R
 });
 
 export const downloadUploadedResume = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const resume = await Resume.findOne({ _id: req.params.id, userId: req.user!.userId });
-  if (!resume) throw new ApiError(404, "Resume not found");
+  const resume = await findOwnResume(String(req.params.id), req.user!.userId);
 
   if (resume.uploadedFileUrl && /^https?:\/\//.test(resume.uploadedFileUrl)) {
     return res.redirect(resume.uploadedFileUrl);

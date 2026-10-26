@@ -6,7 +6,8 @@ services:
     name: aicvbuilderbd-server
     runtime: node
     buildCommand: npm ci && npm run build
-    startCommand: npm start
+    # Applies pending Prisma migrations before each start; a no-op when the schema is current
+    startCommand: npm run db:deploy && npm start
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
@@ -15,7 +16,8 @@ services:
         value: https://aicvbuilderbd.online
       - key: COOKIE_SAME_SITE
         value: none
-      - key: MONGODB_URI
+      # mysql://USER:PASSWORD@HOST:3306/DATABASE; the MySQL server must accept connections from Render
+      - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
         sync: false

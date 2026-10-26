@@ -1,22 +1,30 @@
 import { Response } from "express";
-import { Template } from "../models/Template.js";
+import { prisma } from "../config/database.js";
+import type { TemplateCategory } from "../generated/prisma/client.js";
+import { serializeTemplate } from "../models/serializers.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
-import { User } from "../models/User.js";
 import { getUserLimits } from "../services/subscription.service.js";
+
+const CATEGORIES: readonly string[] = ["ats", "modern", "bangladeshi", "creative"];
 
 export const getTemplates = asyncHandler(async (req: AuthRequest, res: Response) => {
   const category = req.query.category as string | undefined;
-  const filter: Record<string, unknown> = { isActive: true };
-  if (category) filter.category = category;
+  // An unknown category matches nothing, as it did before
+  if (category && !CATEGORIES.includes(category)) {
+    res.json({ success: true, data: [] });
+    return;
+  }
 
-  const templates = await Template.find(filter).sort({ sortOrder: 1 }).lean();
-  let data: Array<Record<string, unknown> & { isPremium?: boolean; locked?: boolean }> =
-    templates.map((t) => ({ ...t }));
+  const templates = await prisma.template.findMany({
+    where: { isActive: true, ...(category && { category: category as TemplateCategory }) },
+    orderBy: { sortOrder: "asc" },
+  });
+  let data: Array<ReturnType<typeof serializeTemplate> & { locked?: boolean }> = templates.map(serializeTemplate);
 
   if (req.user) {
-    const user = await User.findById(req.user.userId);
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
     if (user) {
       const limits = await getUserLimits(user);
       if (!limits.premiumTemplates) {
@@ -29,7 +37,7 @@ export const getTemplates = asyncHandler(async (req: AuthRequest, res: Response)
 });
 
 export const getTemplate = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const template = await Template.findOne({ slug: req.params.slug, isActive: true });
+  const template = await prisma.template.findFirst({ where: { slug: String(req.params.slug), isActive: true } });
   if (!template) throw new ApiError(404, "Template not found");
-  res.json({ success: true, data: template });
+  res.json({ success: true, data: serializeTemplate(template) });
 });

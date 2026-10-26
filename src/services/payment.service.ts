@@ -1,36 +1,30 @@
 import SSLCommerzPayment from "sslcommerz-lts";
 import { v4 as uuidv4 } from "uuid";
 import { config } from "../config/index.js";
-import { Payment } from "../models/Payment.js";
-import { Coupon } from "../models/Coupon.js";
-import { SubscriptionPlan } from "../models/SubscriptionPlan.js";
-import { User } from "../models/User.js";
+import { prisma } from "../config/database.js";
+import { asJson } from "../models/Resume.js";
 import { activatePremium } from "./subscription.service.js";
+import { incrementMetrics } from "./analytics.service.js";
 import { ApiError } from "../utils/ApiError.js";
-import { Analytics } from "../models/Analytics.js";
 
 export const calculatePrice = async (
   planSlug: string,
   billingCycle: "monthly" | "yearly",
   couponCode?: string
 ): Promise<{ amount: number; discount: number; plan: { name: string } }> => {
-  const plan = await SubscriptionPlan.findOne({ slug: planSlug, isActive: true });
+  const plan = await prisma.subscriptionPlan.findFirst({ where: { slug: planSlug, isActive: true } });
   if (!plan) throw new ApiError(404, "Plan not found");
 
   let amount = billingCycle === "yearly" ? plan.priceYearly : plan.priceMonthly;
   let discount = 0;
 
   if (couponCode) {
-    const coupon = await Coupon.findOne({
-      code: couponCode.toUpperCase(),
-      isActive: true,
-      validUntil: { $gte: new Date() },
+    const coupon = await prisma.coupon.findFirst({
+      where: { code: couponCode.toUpperCase(), isActive: true, validUntil: { gte: new Date() } },
     });
     if (coupon && coupon.usedCount < coupon.maxUses) {
-      if (
-        !coupon.applicablePlans.length ||
-        coupon.applicablePlans.includes(planSlug)
-      ) {
+      const applicablePlans = (coupon.applicablePlans ?? []) as string[];
+      if (!applicablePlans.length || applicablePlans.includes(planSlug)) {
         discount =
           coupon.discountType === "percentage"
             ? (amount * coupon.discountValue) / 100
@@ -43,6 +37,25 @@ export const calculatePrice = async (
   return { amount, discount, plan: { name: plan.name } };
 };
 
+/** Grants what a now-completed payment bought: Premium, the coupon use and the revenue metrics. */
+export const completePayment = async (payment: {
+  userId: string | null;
+  billingCycle: "monthly" | "yearly";
+  couponCode: string | null;
+  amount: number;
+}) => {
+  const user = payment.userId ? await prisma.user.findUnique({ where: { id: payment.userId } }) : null;
+  if (user) {
+    await activatePremium(user, payment.billingCycle);
+  }
+
+  if (payment.couponCode) {
+    await prisma.coupon.updateMany({ where: { code: payment.couponCode }, data: { usedCount: { increment: 1 } } });
+  }
+
+  await incrementMetrics({ revenue: payment.amount, premiumConversions: 1 });
+};
+
 export const initiateSSLCommerzPayment = async (
   userId: string,
   planSlug: string,
@@ -53,23 +66,25 @@ export const initiateSSLCommerzPayment = async (
     throw new ApiError(503, "Payment gateway not configured");
   }
 
-  const user = await User.findById(userId);
+  const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new ApiError(404, "User not found");
 
   const { amount, discount } = await calculatePrice(planSlug, billingCycle, couponCode);
   const transactionId = `CHK-${uuidv4().slice(0, 12).toUpperCase()}`;
 
-  await Payment.create({
-    userId,
-    planSlug,
-    billingCycle,
-    amount,
-    currency: "BDT",
-    provider: "sslcommerz",
-    status: "pending",
-    transactionId,
-    couponCode,
-    discountAmount: discount,
+  await prisma.payment.create({
+    data: {
+      userId,
+      planSlug,
+      billingCycle,
+      amount,
+      currency: "BDT",
+      provider: "sslcommerz",
+      status: "pending",
+      transactionId,
+      couponCode,
+      discountAmount: discount,
+    },
   });
 
   const sslcz = new SSLCommerzPayment(
@@ -108,46 +123,21 @@ export const initiateSSLCommerzPayment = async (
 
 export const handleSSLCommerzIPN = async (body: Record<string, string>) => {
   const { tran_id, status, val_id, amount } = body;
-  const payment = await Payment.findOne({ transactionId: tran_id });
+  const payment = tran_id ? await prisma.payment.findUnique({ where: { transactionId: String(tran_id) } }) : null;
   if (!payment) throw new ApiError(404, "Payment not found");
 
   if (payment.status === "completed") return { message: "Already processed" };
 
   if (status === "VALID" || status === "VALIDATED") {
-    payment.status = "completed";
-    payment.providerData = { val_id, amount, ...body };
-    await payment.save();
-
-    const user = await User.findById(payment.userId);
-    if (user) {
-      await activatePremium(user, payment.billingCycle);
-    }
-
-    if (payment.couponCode) {
-      await Coupon.findOneAndUpdate(
-        { code: payment.couponCode },
-        { $inc: { usedCount: 1 } }
-      );
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    await Analytics.findOneAndUpdate(
-      { date: today },
-      {
-        $inc: {
-          "metrics.revenue": payment.amount,
-          "metrics.premiumConversions": 1,
-        },
-      },
-      { upsert: true }
-    );
-
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: "completed", providerData: asJson({ val_id, amount, ...body }) },
+    });
+    await completePayment(payment);
     return { message: "Payment successful" };
   }
 
-  payment.status = "failed";
-  await payment.save();
+  await prisma.payment.update({ where: { id: payment.id }, data: { status: "failed" } });
   return { message: "Payment failed" };
 };
 
@@ -159,15 +149,17 @@ export const initiateBkashPayment = async (
   const { amount } = await calculatePrice(planSlug, billingCycle);
   const transactionId = `BK-${uuidv4().slice(0, 12).toUpperCase()}`;
 
-  await Payment.create({
-    userId,
-    planSlug,
-    billingCycle,
-    amount,
-    currency: "BDT",
-    provider: "bkash",
-    status: "pending",
-    transactionId,
+  await prisma.payment.create({
+    data: {
+      userId,
+      planSlug,
+      billingCycle,
+      amount,
+      currency: "BDT",
+      provider: "bkash",
+      status: "pending",
+      transactionId,
+    },
   });
 
   return {
@@ -187,15 +179,17 @@ export const initiateNagadPayment = async (
   const { amount } = await calculatePrice(planSlug, billingCycle);
   const transactionId = `NG-${uuidv4().slice(0, 12).toUpperCase()}`;
 
-  await Payment.create({
-    userId,
-    planSlug,
-    billingCycle,
-    amount,
-    currency: "BDT",
-    provider: "nagad",
-    status: "pending",
-    transactionId,
+  await prisma.payment.create({
+    data: {
+      userId,
+      planSlug,
+      billingCycle,
+      amount,
+      currency: "BDT",
+      provider: "nagad",
+      status: "pending",
+      transactionId,
+    },
   });
 
   return {

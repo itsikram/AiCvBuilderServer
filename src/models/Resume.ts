@@ -1,5 +1,6 @@
-import mongoose, { Document, Schema } from "mongoose";
-import { normalizeLanguage } from "../utils/language.js";
+import type { Prisma, Resume } from "../generated/prisma/client.js";
+
+export type { Resume };
 
 export interface IExperience {
   id: string;
@@ -189,247 +190,78 @@ export const DEFAULT_SECTION_ORDER = [
   "references",
 ];
 
-export interface IResume extends Document {
-  userId: mongoose.Types.ObjectId;
-  title: string;
-  slug: string;
-  templateId: string;
-  format: "international" | "bangladeshi" | "ats";
-  content: IResumeContent;
-  atsScore?: number;
-  atsFeedback?: string[];
-  isPublic: boolean;
-  publicSlug?: string;
-  language: "en" | "bn";
-  theme: Record<string, string>;
-  sectionOrder: string[];
-  lastExportedAt?: Date;
-  viewCount: number;
-  uploadedResumeText?: string;
-  uploadedFileName?: string;
-  uploadedFilePath?: string;
-  uploadedFileUrl?: string;
-  uploadedFileMimeType?: string;
-  uploadedFileSize?: number;
-  uploadedAt?: Date;
-  createdAt: Date;
-  updatedAt: Date;
-}
+/** Theme for CVs created without a template theme (e.g. imported CVs) */
+export const DEFAULT_THEME: Record<string, string> = {
+  accentColor: "#2563eb",
+  headingColor: "#111827",
+  textColor: "#111827",
+  backgroundColor: "#ffffff",
+  fontFamily: "Inter",
+  nameFontSize: "24",
+  headingFontSize: "12",
+  bodyFontSize: "10",
+  sectionSpacing: "medium",
+  gradientStart: "",
+  gradientEnd: "",
+  gradientDirection: "to-right",
+  backgroundImage: "",
+  backgroundOpacity: "10",
+};
 
-const resumeSchema = new Schema<IResume>(
-  {
-    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    title: { type: String, required: true, trim: true },
-    slug: { type: String, required: true },
-    templateId: { type: String, default: "modern-ats" },
-    format: {
-      type: String,
-      enum: ["international", "bangladeshi", "ats"],
-      default: "ats",
-    },
-    content: {
-      personalInfo: {
-        fullName: { type: String, default: "" },
-        email: { type: String, default: "" },
-        phone: { type: String, default: "" },
-        location: { type: String, default: "" },
-        linkedin: String,
-        portfolio: String,
-        github: String,
-        website: String,
-        summary: { type: String, default: "" },
-        jobTitle: String,
-        profilePhoto: String,
-        profilePhotoSize: { type: String, enum: ["small", "medium", "large"], default: "medium" },
-        profilePhotoAlignment: { type: String, enum: ["left", "center", "right"], default: "center" },
-      },
-      experience: [
-        {
-          id: String,
-          company: String,
-          position: String,
-          location: String,
-          startDate: String,
-          endDate: String,
-          current: Boolean,
-          bullets: [String],
-        },
-      ],
-      careerObjective: { type: String, default: "" },
-      personalDetails: {
-        fatherName: String,
-        motherName: String,
-        dateOfBirth: String,
-        gender: String,
-        nationality: String,
-        religion: String,
-        maritalStatus: String,
-        nid: String,
-        bloodGroup: String,
-        permanentAddress: String,
-      },
-      education: [
-        {
-          id: String,
-          institution: String,
-          degree: String,
-          field: String,
-          startDate: String,
-          endDate: String,
-          gpa: String,
-          level: String,
-          board: String,
-          gpaScale: String,
-          passingYear: String,
-        },
-      ],
-      trainings: [
-        {
-          id: String,
-          title: String,
-          institute: String,
-          duration: String,
-          year: String,
-          description: String,
-        },
-      ],
-      projects: [
-        {
-          id: String,
-          name: String,
-          description: String,
-          url: String,
-          technologies: [String],
-        },
-      ],
-      skills: [String],
-      languages: [
-        {
-          id: String,
-          name: String,
-          proficiency: { type: String, enum: ["native", "fluent", "intermediate", "basic"] },
-        },
-      ],
-      certifications: [
-        {
-          id: String,
-          name: String,
-          issuer: String,
-          date: String,
-          credentialId: String,
-          credentialUrl: String,
-        },
-      ],
-      awards: [
-        {
-          id: String,
-          title: String,
-          issuer: String,
-          date: String,
-          description: String,
-        },
-      ],
-      publications: [
-        {
-          id: String,
-          title: String,
-          publisher: String,
-          date: String,
-          url: String,
-          description: String,
-        },
-      ],
-      volunteerExperience: [
-        {
-          id: String,
-          organization: String,
-          role: String,
-          startDate: String,
-          endDate: String,
-          current: Boolean,
-          description: String,
-        },
-      ],
-      references: [
-        {
-          id: String,
-          name: String,
-          position: String,
-          company: String,
-          email: String,
-          phone: String,
-          relationship: String,
-        },
-      ],
-      interests: [String],
-      courses: [
-        {
-          id: String,
-          name: String,
-          provider: String,
-          date: String,
-          certificateUrl: String,
-        },
-      ],
-      memberships: [
-        {
-          id: String,
-          organization: String,
-          role: String,
-          startDate: String,
-          endDate: String,
-          current: Boolean,
-        },
-      ],
-      customSections: [{ title: String, content: String }],
-    },
-    atsScore: Number,
-    atsFeedback: [String],
-    isPublic: { type: Boolean, default: false },
-    publicSlug: { type: String, sparse: true, unique: true },
-    language: { type: String, enum: ["en", "bn"], default: "en" },
-  theme: {
-    type: Map,
-    of: String,
-    default: {
-      accentColor: "#2563eb",
-      headingColor: "#111827",
-      textColor: "#111827",
-      backgroundColor: "#ffffff",
-      fontFamily: "Inter",
-      nameFontSize: "24",
-      headingFontSize: "12",
-      bodyFontSize: "10",
-      sectionSpacing: "medium",
-      gradientStart: "",
-      gradientEnd: "",
-      gradientDirection: "to-right",
-      backgroundImage: "",
-      backgroundOpacity: "10",
-    },
-  },
-    sectionOrder: {
-      type: [String],
-      default: () => [...DEFAULT_SECTION_ORDER],
-    },
-    lastExportedAt: Date,
-    viewCount: { type: Number, default: 0 },
-    uploadedResumeText: { type: String, default: null },
-    uploadedFileName: { type: String, default: null },
-    uploadedFilePath: { type: String, default: null },
-    uploadedFileUrl: { type: String, default: null },
-    uploadedFileMimeType: { type: String, default: null },
-    uploadedFileSize: { type: Number, default: null },
-    uploadedAt: { type: Date, default: null },
-  },
-  { timestamps: true }
-);
+const LIST_SECTIONS = [
+  "experience",
+  "education",
+  "trainings",
+  "projects",
+  "skills",
+  "languages",
+  "certifications",
+  "awards",
+  "publications",
+  "volunteerExperience",
+  "references",
+  "interests",
+  "courses",
+  "memberships",
+  "customSections",
+] as const;
 
-resumeSchema.index({ userId: 1, createdAt: -1 });
+/**
+ * Fills the defaults every stored CV has (empty lists, personal info strings, photo
+ * layout), so readers never meet a missing section. Applied before each write.
+ */
+export const withContentDefaults = (content: Partial<IResumeContent> | undefined): IResumeContent => {
+  const source = (content ?? {}) as Partial<IResumeContent>;
+  const info: Partial<IResumeContent["personalInfo"]> = source.personalInfo ?? {};
+  const filled = {
+    ...source,
+    personalInfo: {
+      ...info,
+      fullName: info.fullName ?? "",
+      email: info.email ?? "",
+      phone: info.phone ?? "",
+      location: info.location ?? "",
+      summary: info.summary ?? "",
+      profilePhotoSize: info.profilePhotoSize ?? "medium",
+      profilePhotoAlignment: info.profilePhotoAlignment ?? "center",
+    },
+    careerObjective: source.careerObjective ?? "",
+  } as IResumeContent;
+  for (const key of LIST_SECTIONS) {
+    if (!Array.isArray(filled[key])) (filled as unknown as Record<string, unknown[]>)[key] = [];
+  }
+  return filled;
+};
 
-resumeSchema.pre("validate", function (next) {
-  this.language = normalizeLanguage(this.language);
-  next();
+/** Json column value for Prisma writes */
+export const asJson = (value: unknown) => value as Prisma.InputJsonValue;
+
+/** A CV for API responses, in the shape the client has always received */
+export const serializeResume = (resume: Resume) => ({
+  _id: resume.id,
+  ...resume,
+  content: resume.content as unknown as IResumeContent,
+  theme: (resume.theme ?? {}) as Record<string, string>,
+  sectionOrder: (resume.sectionOrder ?? []) as string[],
+  atsFeedback: (resume.atsFeedback ?? []) as string[],
 });
-
-export const Resume = mongoose.model<IResume>("Resume", resumeSchema);

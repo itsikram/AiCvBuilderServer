@@ -1,11 +1,6 @@
-import mongoose from "mongoose";
 import dotenv from "dotenv";
-import { connectDatabase, disconnectDatabase } from "../config/database.js";
-import { User } from "../models/User.js";
-import { Template } from "../models/Template.js";
-import { SubscriptionPlan } from "../models/SubscriptionPlan.js";
-import { Coupon } from "../models/Coupon.js";
-import { Blog } from "../models/Blog.js";
+import { connectDatabase, disconnectDatabase, prisma } from "../config/database.js";
+import { hashPassword } from "../models/User.js";
 
 dotenv.config();
 
@@ -386,71 +381,82 @@ async function seed() {
   // Pass --reset to wipe and re-insert templates, plans and coupons.
   const reset = process.argv.includes("--reset");
   if (reset) {
-    await Template.deleteMany({});
-    await SubscriptionPlan.deleteMany({});
-    await Coupon.deleteMany({});
+    await prisma.template.deleteMany({});
+    await prisma.subscriptionPlan.deleteMany({});
+    await prisma.coupon.deleteMany({});
   }
 
+  // update: {} inserts missing rows and leaves existing ones as the admin left them
   for (const template of templates) {
-    await Template.updateOne({ slug: template.slug }, { $setOnInsert: template }, { upsert: true });
+    await prisma.template.upsert({
+      where: { slug: template.slug },
+      create: { defaultTheme: {}, ...template },
+      update: {},
+    });
   }
-  for (const plan of plans) {
-    await SubscriptionPlan.updateOne({ slug: plan.slug }, { $setOnInsert: plan }, { upsert: true });
+  for (const { limits, ...plan } of plans) {
+    await prisma.subscriptionPlan.upsert({
+      where: { slug: plan.slug },
+      create: { ...plan, ...limits },
+      update: {},
+    });
   }
 
-  await Coupon.updateOne(
-    { code: "AICVBD20" },
-    {
-      $setOnInsert: {
-        code: "AICVBD20",
-        description: "20% off Premium plan",
-        discountType: "percentage",
-        discountValue: 20,
-        maxUses: 1000,
-        validUntil: new Date("2027-12-31"),
-        applicablePlans: ["premium"],
-      },
+  await prisma.coupon.upsert({
+    where: { code: "AICVBD20" },
+    create: {
+      code: "AICVBD20",
+      description: "20% off Premium plan",
+      discountType: "percentage",
+      discountValue: 20,
+      maxUses: 1000,
+      validUntil: new Date("2027-12-31"),
+      applicablePlans: ["premium"],
     },
-    { upsert: true }
-  );
+    update: {},
+  });
 
   // Admin credentials come from env only; nothing is hardcoded or printed.
   const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD;
-  let admin = adminEmail ? await User.findOne({ email: adminEmail }) : await User.findOne({ role: "admin" });
+  let admin = adminEmail
+    ? await prisma.user.findUnique({ where: { email: adminEmail } })
+    : await prisma.user.findFirst({ where: { role: "admin" } });
   if (!admin && adminEmail && adminPassword) {
     if (adminPassword.length < 10) {
       throw new Error("ADMIN_PASSWORD must be at least 10 characters");
     }
-    admin = await User.create({
-      name: "Admin",
-      email: adminEmail,
-      password: adminPassword,
-      role: "admin",
-      isEmailVerified: true,
-      referralCode: "CVADMIN001",
+    admin = await prisma.user.create({
+      data: {
+        name: "Admin",
+        email: adminEmail,
+        password: await hashPassword(adminPassword),
+        role: "admin",
+        isEmailVerified: true,
+        referralCode: "CVADMIN001",
+      },
     });
     console.log(`Admin created: ${adminEmail}`);
   } else if (!admin) {
     console.warn("No admin user created. Set ADMIN_EMAIL and ADMIN_PASSWORD to create one.");
   }
 
-  const blogCount = await Blog.countDocuments();
+  const blogCount = await prisma.blog.count();
   if (blogCount === 0 && admin) {
-    await Blog.create({
+    await prisma.blog.create({ data: {
       title: "How to Write an ATS-Friendly Resume in Bangladesh (2026 Guide)",
       slug: "ats-friendly-resume-bangladesh-2026",
       excerpt:
         "Learn how to optimize your resume for Bangladesh's top companies and international remote jobs using ATS best practices.",
       content: `<h2>Why ATS Matters in Bangladesh</h2><p>Most large employers in Bangladesh including BRAC, Grameenphone, and multinational companies use Applicant Tracking Systems...</p>`,
-      author: admin._id,
+      authorId: admin.id,
       tags: ["ATS", "Resume Tips", "Bangladesh Jobs"],
       language: "en",
       isPublished: true,
       publishedAt: new Date(),
       metaTitle: "ATS Resume Guide Bangladesh 2026 | AI CV Builder BD",
       metaDescription: "Complete guide to writing ATS-friendly resumes for Bangladesh job market",
-    });
+    } });
   }
 
   console.log("Seed completed successfully");

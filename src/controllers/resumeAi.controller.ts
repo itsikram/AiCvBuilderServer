@@ -1,7 +1,8 @@
 import { Response } from "express";
 import { z } from "zod";
-import { IResumeContent, Resume } from "../models/Resume.js";
-import { IUser, User } from "../models/User.js";
+import { prisma } from "../config/database.js";
+import { IResumeContent, asJson, serializeResume, withContentDefaults } from "../models/Resume.js";
+import type { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
@@ -25,13 +26,13 @@ import type {
 type Body<S extends z.ZodTypeAny> = z.infer<S>;
 
 const loadUser = async (req: AuthRequest) => {
-  const user = await User.findById(req.user!.userId);
+  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (!user) throw new ApiError(404, "User not found");
   return user;
 };
 
 /** Runs one quota-counted AI request: checks the limits first and counts only successes. */
-const withAiQuota = async <T>(req: AuthRequest, run: (user: IUser) => Promise<T>): Promise<T> => {
+const withAiQuota = async <T>(req: AuthRequest, run: (user: User) => Promise<T>): Promise<T> => {
   const user = await loadUser(req);
   await checkAiLimit(user);
   const result = await run(user);
@@ -47,9 +48,9 @@ const withAiQuota = async <T>(req: AuthRequest, run: (user: IUser) => Promise<T>
 const contentFor = async (req: AuthRequest, body: Body<typeof aiContentSchema>): Promise<Partial<IResumeContent>> => {
   if (body.content) return body.content as Partial<IResumeContent>;
   if (!body.resumeId) throw new ApiError(400, "Send the CV content or a resumeId.");
-  const resume = await Resume.findOne({ _id: body.resumeId, userId: req.user!.userId });
+  const resume = await prisma.resume.findFirst({ where: { id: body.resumeId, userId: req.user!.userId } });
   if (!resume) throw new ApiError(404, "Resume not found");
-  return resume.toObject().content;
+  return resume.content as unknown as IResumeContent;
 };
 
 const byId = (fields: TextField[]) => new Map(fields.map((f) => [f.id, f]));
@@ -188,14 +189,14 @@ const TRANSLATED_SUFFIX = { bn: "বাংলা", en: "English" } as const;
 /** Creates a translated copy of a CV; the original is left untouched. */
 export const translateResume = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { targetLanguage } = req.body as Body<typeof translateResumeSchema>;
-  const original = await Resume.findOne({ _id: req.params.id, userId: req.user!.userId });
+  const original = await prisma.resume.findFirst({ where: { id: String(req.params.id), userId: req.user!.userId } });
   if (!original) throw new ApiError(404, "Resume not found");
 
   const user = await loadUser(req);
-  await checkResumeLimit(user, await Resume.countDocuments({ userId: user._id }));
+  await checkResumeLimit(user, await prisma.resume.count({ where: { userId: user.id } }));
 
-  const source = original.toObject();
-  const fields = collectTextFields(source.content, "all");
+  const sourceContent = withContentDefaults(original.content as unknown as IResumeContent);
+  const fields = collectTextFields(sourceContent, "all");
   if (!fields.length) throw new ApiError(400, "This CV has no text to translate yet.");
 
   const translated = await withAiQuota(req, async () => {
@@ -208,24 +209,25 @@ export const translateResume = asyncHandler(async (req: AuthRequest, res: Respon
         if (field && item.text.trim()) updates.push({ path: field.path, text: item.text.trim() });
       }
     }
-    return applyTextUpdates(source.content, updates);
+    return applyTextUpdates(sourceContent, updates);
   });
 
   const title = `${original.title} (${TRANSLATED_SUFFIX[targetLanguage]})`.slice(0, 200);
-  const copy = await Resume.create({
-    userId: user._id,
-    title,
-    slug: generateUniqueSlug(title),
-    templateId: original.templateId,
-    format: original.format,
-    content: translated,
-    language: normalizeLanguage(targetLanguage),
-    theme: source.theme,
-    sectionOrder: original.sectionOrder,
+  const copy = await prisma.resume.create({
+    data: {
+      userId: user.id,
+      title,
+      slug: generateUniqueSlug(title),
+      templateId: original.templateId,
+      format: original.format,
+      content: asJson(translated),
+      language: normalizeLanguage(targetLanguage),
+      theme: asJson(original.theme),
+      sectionOrder: asJson(original.sectionOrder),
+    },
   });
-  user.usage.resumesCreated += 1;
-  await user.save();
+  await prisma.user.update({ where: { id: user.id }, data: { resumesCreated: { increment: 1 } } });
   await trackEvent("resumesCreated");
 
-  res.status(201).json({ success: true, data: copy });
+  res.status(201).json({ success: true, data: serializeResume(copy) });
 });

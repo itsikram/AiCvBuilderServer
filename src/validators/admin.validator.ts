@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const idParamSchema = z.object({ id: z.string().regex(/^[a-f\d]{24}$/i, "Invalid id") });
+export const idParamSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{1,36}$/, "Invalid id") });
 
 /** Admins can change these user fields; passwords and usage counters are not editable here. */
 export const adminUpdateUserSchema = z

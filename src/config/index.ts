@@ -10,7 +10,7 @@ const envSchema = z.object({
   SITE_URL: z.string().url().optional(),
   ALLOWED_ORIGINS: z.string().optional(),
   COOKIE_DOMAIN: z.string().optional(),
-  MONGODB_URI: z.string().min(1),
+  DATABASE_URL: z.string().regex(/^mysql:\/\//,"must be a mysql:// connection string"),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default("7d"),
   JWT_REFRESH_SECRET: z.string().min(32),
@@ -102,7 +102,7 @@ export const config = {
     : process.env.NODE_ENV === "production"
       ? "none"
       : "lax") as "lax" | "strict" | "none",
-  mongodbUri: process.env.MONGODB_URI || "mongodb://localhost:27017/aicvbuilderbd",
+  databaseUrl: process.env.DATABASE_URL || "mysql://root@localhost:3306/aicvbuilderbd",
   jwt: {
     secret: process.env.JWT_SECRET || "dev-secret-change-me-in-production-32chars",
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",

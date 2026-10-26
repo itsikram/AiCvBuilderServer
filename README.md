@@ -1,11 +1,11 @@
 # AI CV Builder BD — AI Resume Builder SaaS for Bangladesh
 
-> This repository is the **API** (Express + MongoDB). The React frontend lives in its own
+> This repository is the **API** (Express + MySQL via Prisma). The React frontend lives in its own
 > repository (`aicvbuilderbd-client`) and is deployed separately as static files.
 
 API for a bilingual (Bangla/English) CV builder for the Bangladesh job market: CVs, AI writing help, cover letters, payments and admin. AI runs on **Google Gemini** (model set by `GEMINI_MODEL`, default `gemini-3.5-flash-lite`).
 
-![Stack](https://img.shields.io/badge/Stack-MERN-blue)
+![Stack](https://img.shields.io/badge/Stack-Express%20%2B%20MySQL-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -38,7 +38,7 @@ API for a bilingual (Bangla/English) CV builder for the Bangladesh job market: C
 |-------|------------|
 | Frontend | React 19, Vite, TypeScript, TailwindCSS, shadcn/ui, Zustand, TanStack Query, Framer Motion |
 | Backend | Node.js, Express, TypeScript, MVC architecture |
-| Database | MongoDB (Mongoose) |
+| Database | MySQL / MariaDB (Prisma ORM) |
 | Cache | Redis (ioredis) |
 | AI | Google Gemini 2.5 Flash |
 | Auth | JWT + Google OAuth |
@@ -46,7 +46,7 @@ API for a bilingual (Bangla/English) CV builder for the Bangladesh job market: C
 | Email | Nodemailer |
 | Files | Cloudinary |
 | PDF | PDFKit |
-| Security | Helmet, rate limiting, mongo-sanitize, Zod validation |
+| Security | Helmet, rate limiting, Zod validation, parameterized queries (Prisma) |
 
 ## Project Structure
 
@@ -56,13 +56,16 @@ aicvbuilderbd-server/
 │   ├── config/         # DB, Redis, env
 │   ├── controllers/    # MVC controllers
 │   ├── middleware/     # Auth, validation, rate limit
-│   ├── models/         # Mongoose schemas
+│   ├── models/         # CV types and API response serializers
+│   ├── generated/      # Prisma client (generated, not committed)
 │   ├── routes/         # API routes
 │   ├── services/       # AI, PDF, payment, email
 │   └── scripts/        # Seed data
+├── prisma/             # schema.prisma and SQL migrations
+├── scripts/            # cPanel packaging, MongoDB → MySQL data copy
 ├── docs/               # API reference and feature notes
 ├── Dockerfile
-├── docker-compose.yml  # MongoDB + Redis + API for local development
+├── docker-compose.yml  # MySQL + Redis + API for local development
 └── render.yaml         # Render blueprint
 ```
 
@@ -71,7 +74,7 @@ aicvbuilderbd-server/
 ### Prerequisites
 
 - Node.js 20+
-- MongoDB (local or Atlas)
+- MySQL 8+ or MariaDB 10.4+ (local, XAMPP, Docker or hosted)
 - Redis (optional, recommended)
 - Gemini API key
 
@@ -92,18 +95,24 @@ cp .env.example .env
 Edit `.env` with your credentials (minimum):
 
 ```env
-MONGODB_URI=mongodb://localhost:27017/aicvbuilderbd
+DATABASE_URL=mysql://root:password@localhost:3306/aicvbuilderbd
 JWT_SECRET=your-32-char-minimum-secret-key-here
 JWT_REFRESH_SECRET=your-32-char-refresh-secret-key
 GEMINI_API_KEY=your-gemini-api-key
 CLIENT_URL=http://localhost:5173
 ```
 
-### 3. Seed database
+### 3. Create the tables and seed
+
+Create an empty database (`CREATE DATABASE aicvbuilderbd CHARACTER SET utf8mb4;`), then:
 
 ```bash
+npm run db:deploy   # applies prisma/migrations
 npm run seed
 ```
+
+Changing the schema: edit `prisma/schema.prisma`, then `npm run db:migrate -- --name <change>`
+creates and applies a new migration (commit it). `npm run db:studio` opens a data browser.
 
 Admin user: set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`, then run `npm run seed`.
 
@@ -170,7 +179,9 @@ See [docs/API.md](docs/API.md) for full endpoint reference.
    calling `*.onrender.com`), set `COOKIE_SAME_SITE=none` so the refresh-token cookie is
    sent cross-site. Browsers that block third-party cookies (Safari, some privacy modes)
    will still drop it; serving the API from `api.<your-domain>` avoids that.
-4. Add the MongoDB Atlas URI to env. Redis is optional: without `REDIS_URL` (or with
+4. Set `DATABASE_URL` to a MySQL database that accepts connections from Render (cPanel MySQL
+   needs Remote MySQL access for Render's outbound IPs). The start command runs
+   `npm run db:deploy` first, so new migrations apply on deploy. Redis is optional: without `REDIS_URL` (or with
    `DISABLE_REDIS=true`) the cache falls back to process memory, which suits a single process.
 
 For GoDaddy/cPanel hosting (Node.js App or static frontend + API elsewhere) see the client repository's
@@ -189,12 +200,17 @@ For GoDaddy/cPanel hosting (Node.js App or static frontend + API elsewhere) see 
 See the client repository's README. It builds to static files (`dist/`, including a
 generated `.htaccess`) that are uploaded to cPanel.
 
-### MongoDB Atlas
+### Moving the data from MongoDB
 
-Use connection string in `MONGODB_URI`:
+The API used MongoDB until October 2026. To copy an existing MongoDB database into MySQL once:
+
+```bash
+npm run db:deploy
+MONGODB_URI="mongodb+srv://..." DATABASE_URL="mysql://..." npm run migrate:mongo
 ```
-mongodb+srv://user:pass@cluster.mongodb.net/aicvbuilderbd
-```
+
+Rows keep their MongoDB ids, so public CV links and references between records survive.
+MongoDB is only read. The script skips rows that already exist, so it can be re-run.
 
 ## Subscription Plans
 

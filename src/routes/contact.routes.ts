@@ -3,7 +3,7 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { validate } from "../middleware/validate.middleware.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { ContactMessage } from "../models/ContactMessage.js";
+import { prisma } from "../config/database.js";
 import { sendEmail, escapeHtml } from "../services/email.service.js";
 import { config } from "../config/index.js";
 
@@ -31,7 +31,7 @@ router.post(
   validate(contactSchema),
   asyncHandler(async (req: Request, res: Response) => {
     const { name, email, message } = req.body as z.infer<typeof contactSchema>;
-    await ContactMessage.create({ name, email, message, ip: req.ip });
+    await prisma.contactMessage.create({ data: { name, email: email.toLowerCase(), message, ip: req.ip } });
 
     const to = process.env.CONTACT_EMAIL || process.env.SUPPORT_EMAIL;
     if (to) {

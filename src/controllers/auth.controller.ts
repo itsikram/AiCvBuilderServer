@@ -1,7 +1,8 @@
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import { Response } from "express";
-import { User } from "../models/User.js";
+import { prisma } from "../config/database.js";
+import { User, comparePassword, hashPassword, serializeUser, subscriptionOf, usageOf } from "../models/User.js";
 import { config } from "../config/index.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -24,9 +25,11 @@ const refreshCookieOptions = {
   domain: config.cookieDomain,
 };
 
-const sendTokens = (res: Response, user: InstanceType<typeof User>) => {
+const normalizeEmail = (email: unknown) => String(email ?? "").trim().toLowerCase();
+
+const sendTokens = (res: Response, user: User) => {
   const payload = {
-    userId: user._id.toString(),
+    userId: user.id,
     email: user.email,
     role: user.role,
   };
@@ -42,15 +45,15 @@ const sendTokens = (res: Response, user: InstanceType<typeof User>) => {
     success: true,
     data: {
       user: {
-        id: user._id,
+        id: user.id,
         name: user.name,
         email: user.email,
         role: user.role,
         language: normalizeLanguage(user.language),
         theme: user.theme,
-        avatar: user.avatar,
+        avatar: user.avatar ?? undefined,
         isEmailVerified: user.isEmailVerified,
-        subscription: user.subscription,
+        subscription: subscriptionOf(user),
         referralCode: user.referralCode,
       },
       accessToken,
@@ -72,36 +75,39 @@ const uploadProfilePicture = async (file?: Express.Multer.File) => {
   return uploaded.url;
 };
 
-export const register = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { name, email, password, referralCode, language } = req.body;
+const newReferralCode = () => `CV${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
 
-  const existing = await User.findOne({ email });
+export const register = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { name, password, referralCode, language } = req.body;
+  const email = normalizeEmail(req.body.email);
+
+  const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw new ApiError(409, "Email already registered");
 
   const verificationToken = crypto.randomBytes(32).toString("hex");
-  const userReferralCode = `CV${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
   const avatar = await uploadProfilePicture(req.file);
 
-  let referredBy;
+  let referredById: string | undefined;
   if (referralCode) {
-    const referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+    const referrer = await prisma.user.findUnique({ where: { referralCode: String(referralCode).toUpperCase() } });
     if (referrer) {
-      referredBy = referrer._id;
-      referrer.referralCount += 1;
-      await referrer.save();
+      referredById = referrer.id;
+      await prisma.user.update({ where: { id: referrer.id }, data: { referralCount: { increment: 1 } } });
     }
   }
 
-  const user = await User.create({
-    name,
-    email,
-    password,
-    avatar,
-    language: language || "en",
-    referralCode: userReferralCode,
-    referredBy,
-    emailVerificationToken: crypto.createHash("sha256").update(verificationToken).digest("hex"),
-    emailVerificationExpires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  const user = await prisma.user.create({
+    data: {
+      name: String(name).trim(),
+      email,
+      password: await hashPassword(password),
+      avatar,
+      language: normalizeLanguage(language || "en"),
+      referralCode: newReferralCode(),
+      referredById,
+      emailVerificationToken: crypto.createHash("sha256").update(verificationToken).digest("hex"),
+      emailVerificationExpires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    },
   });
 
   await sendVerificationEmail(email, name, verificationToken);
@@ -111,14 +117,13 @@ export const register = asyncHandler(async (req: AuthRequest, res: Response) => 
 });
 
 export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email }).select("+password");
-  if (!user || !(await user.comparePassword(password))) {
+  const { password } = req.body;
+  const found = await prisma.user.findUnique({ where: { email: normalizeEmail(req.body.email) } });
+  if (!found || !(await comparePassword(found, password))) {
     throw new ApiError(401, "Invalid email or password");
   }
 
-  user.lastLoginAt = new Date();
-  await user.save();
+  const user = await prisma.user.update({ where: { id: found.id }, data: { lastLoginAt: new Date() } });
   await trackEvent("activeUsers");
 
   sendTokens(res, user);
@@ -134,28 +139,33 @@ export const googleLogin = asyncHandler(async (req: AuthRequest, res: Response) 
   });
   const payload = ticket.getPayload();
   if (!payload?.email) throw new ApiError(400, "Invalid Google token");
+  const email = normalizeEmail(payload.email);
 
-  let user = await User.findOne({ $or: [{ googleId: payload.sub }, { email: payload.email }] });
+  let user = await prisma.user.findFirst({ where: { OR: [{ googleId: payload.sub }, { email }] } });
 
   if (!user) {
-    const referralCode = `CV${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
-    user = await User.create({
-      name: payload.name || payload.email.split("@")[0],
-      email: payload.email,
-      googleId: payload.sub,
-      avatar: payload.picture,
-      isEmailVerified: payload.email_verified ?? true,
-      referralCode,
+    user = await prisma.user.create({
+      data: {
+        name: payload.name || email.split("@")[0],
+        email,
+        googleId: payload.sub,
+        avatar: payload.picture,
+        isEmailVerified: payload.email_verified ?? true,
+        referralCode: newReferralCode(),
+        lastLoginAt: new Date(),
+      },
     });
     await trackEvent("newUsers");
-  } else if (!user.googleId) {
-    user.googleId = payload.sub;
-    user.isEmailVerified = true;
-    await user.save();
+  } else {
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: new Date(),
+        ...(!user.googleId && { googleId: payload.sub, isEmailVerified: true }),
+      },
+    });
   }
 
-  user.lastLoginAt = new Date();
-  await user.save();
   sendTokens(res, user);
 });
 
@@ -165,7 +175,7 @@ export const refreshToken = asyncHandler(async (req: AuthRequest, res: Response)
 
   const { verifyRefreshToken } = await import("../utils/tokens.js");
   const payload = verifyRefreshToken(token);
-  const user = await User.findById(payload.userId);
+  const user = await prisma.user.findUnique({ where: { id: payload.userId } });
   if (!user) throw new ApiError(401, "User not found");
 
   sendTokens(res, user);
@@ -177,21 +187,21 @@ export const logout = asyncHandler(async (_req: AuthRequest, res: Response) => {
 });
 
 export const getMe = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const user = await User.findById(req.user!.userId);
+  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (!user) throw new ApiError(404, "User not found");
   res.json({
     success: true,
     data: {
-      id: user._id,
+      id: user.id,
       name: user.name,
       email: user.email,
-      avatar: user.avatar,
+      avatar: user.avatar ?? undefined,
       role: user.role,
       language: normalizeLanguage(user.language),
       theme: user.theme,
       isEmailVerified: user.isEmailVerified,
-      subscription: user.subscription,
-      usage: user.usage,
+      subscription: subscriptionOf(user),
+      usage: usageOf(user),
       referralCode: user.referralCode,
       referralCount: user.referralCount,
     },
@@ -201,32 +211,35 @@ export const getMe = asyncHandler(async (req: AuthRequest, res: Response) => {
 export const verifyEmail = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { token } = req.body;
   const hashed = crypto.createHash("sha256").update(token).digest("hex");
-  const user = await User.findOne({
-    emailVerificationToken: hashed,
-    emailVerificationExpires: { $gt: new Date() },
+  const user = await prisma.user.findFirst({
+    where: { emailVerificationToken: hashed, emailVerificationExpires: { gt: new Date() } },
   });
   if (!user) throw new ApiError(400, "Invalid or expired verification token");
 
-  user.isEmailVerified = true;
-  user.emailVerificationToken = undefined;
-  user.emailVerificationExpires = undefined;
-  await user.save();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { isEmailVerified: true, emailVerificationToken: null, emailVerificationExpires: null },
+  });
 
   res.json({ success: true, message: "Email verified successfully" });
 });
 
 export const forgotPassword = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { email } = req.body;
-  const user = await User.findOne({ email });
+  const email = normalizeEmail(req.body.email);
+  const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
     res.json({ success: true, message: "If email exists, reset link sent" });
     return;
   }
 
   const resetToken = crypto.randomBytes(32).toString("hex");
-  user.passwordResetToken = crypto.createHash("sha256").update(resetToken).digest("hex");
-  user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000);
-  await user.save();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      passwordResetToken: crypto.createHash("sha256").update(resetToken).digest("hex"),
+      passwordResetExpires: new Date(Date.now() + 60 * 60 * 1000),
+    },
+  });
   await sendPasswordResetEmail(email, user.name, resetToken);
 
   res.json({ success: true, message: "If email exists, reset link sent" });
@@ -235,16 +248,15 @@ export const forgotPassword = asyncHandler(async (req: AuthRequest, res: Respons
 export const resetPassword = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { token, password } = req.body;
   const hashed = crypto.createHash("sha256").update(token).digest("hex");
-  const user = await User.findOne({
-    passwordResetToken: hashed,
-    passwordResetExpires: { $gt: new Date() },
-  }).select("+password");
+  const user = await prisma.user.findFirst({
+    where: { passwordResetToken: hashed, passwordResetExpires: { gt: new Date() } },
+  });
   if (!user) throw new ApiError(400, "Invalid or expired reset token");
 
-  user.password = password;
-  user.passwordResetToken = undefined;
-  user.passwordResetExpires = undefined;
-  await user.save();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { password: await hashPassword(password), passwordResetToken: null, passwordResetExpires: null },
+  });
 
   res.json({ success: true, message: "Password reset successful" });
 });
@@ -254,16 +266,15 @@ export const updateProfile = asyncHandler(async (req: AuthRequest, res: Response
   const language = typeof req.body.language !== "undefined" ? normalizeLanguage(req.body.language) : undefined;
   const avatar = await uploadProfilePicture(req.file);
 
-  const user = await User.findByIdAndUpdate(
-    req.user!.userId,
-    {
+  const user = await prisma.user.update({
+    where: { id: req.user!.userId },
+    data: {
       ...(name && { name }),
       ...(language !== undefined && { language }),
       ...(theme && { theme }),
       ...(avatar ? { avatar } : {}),
     },
-    { new: true, runValidators: true }
-  );
+  });
 
-  res.json({ success: true, data: user });
+  res.json({ success: true, data: serializeUser(user) });
 });

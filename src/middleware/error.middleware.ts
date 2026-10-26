@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { ApiError } from "../utils/ApiError.js";
 import multer from "multer";
 import { config } from "../config/index.js";
+import { Prisma } from "../generated/prisma/client.js";
 
 export const errorHandler = (
   err: Error | ApiError,
@@ -49,13 +50,21 @@ export const errorHandler = (
     return;
   }
 
-  if (err.name === "CastError") {
-    res.status(400).json({ success: false, message: "Invalid ID format" });
-    return;
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (err.code === "P2002") {
+      res.status(409).json({ success: false, message: "Duplicate field value" });
+      return;
+    }
+    if (err.code === "P2025") {
+      res.status(404).json({ success: false, message: "Record not found" });
+      return;
+    }
   }
 
-  if ((err as { code?: number }).code === 11000) {
-    res.status(409).json({ success: false, message: "Duplicate field value" });
+  // A value the schema doesn't accept, e.g. an unknown enum value or a missing required field
+  if (err instanceof Prisma.PrismaClientValidationError) {
+    console.warn("Rejected database input:", err.message);
+    res.status(400).json({ success: false, message: "Invalid input" });
     return;
   }
 

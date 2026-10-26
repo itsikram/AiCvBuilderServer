@@ -23,11 +23,14 @@ fs.cpSync(path.join(root, "dist"), path.join(out, "dist"), {
   // Source maps and compiled tests aren't needed on the server
   filter: (src) => !src.endsWith(".map") && !src.endsWith(".test.js"),
 });
-for (const file of ["app.cjs", "package.json", "package-lock.json"]) {
+for (const file of ["app.cjs", "package.json", "package-lock.json", "prisma.config.ts"]) {
   fs.copyFileSync(path.join(root, file), path.join(out, file));
 }
+// The schema and migrations: `npm install` runs `prisma generate`, and `npm run db:deploy`
+// applies the migrations to the cPanel MySQL database
+fs.cpSync(path.join(root, "prisma"), path.join(out, "prisma"), { recursive: true });
 // cPanel's "Run NPM Install" runs plain `npm install`; skip dev dependencies (TypeScript,
-// mongodb-memory-server, which downloads a ~100 MB MongoDB binary) to stay inside shared-hosting limits
+// the MongoDB driver used only by the one-off data migration) to stay inside shared-hosting limits
 fs.writeFileSync(path.join(out, ".npmrc"), "omit=dev\nfund=false\naudit=false\n");
 
 try {
@@ -43,4 +46,7 @@ try {
 } catch {
   console.log(`No zip tool found; zip the contents of ${path.relative(root, out)} yourself`);
 }
-console.log("Upload it to the application root, extract, then Run NPM Install and Restart in cPanel.");
+console.log(
+  "Upload it to the application root, extract, then Run NPM Install, run `npm run db:deploy` " +
+    "(cPanel Terminal, in the app's virtual environment) and Restart in cPanel."
+);

@@ -109,8 +109,7 @@ export function getAtPath(target: unknown, path: string): unknown {
  * rather than creating fields (or touching __proto__).
  */
 export function applyTextUpdates<T extends object>(content: T, updates: Array<{ path: string; text: string }>): T {
-  // JSON round-trip (not structuredClone): turns Mongoose ObjectIds into strings
-  // that cast back cleanly, where structuredClone leaves unusable buffer objects
+  // Deep copy, so the caller's content is never changed
   const copy = JSON.parse(JSON.stringify(content)) as T;
   for (const { path, text } of updates) {
     const keys = path.split(".");

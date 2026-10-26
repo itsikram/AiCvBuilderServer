@@ -1,5 +1,6 @@
-import { IUser, User } from "../models/User.js";
-import { SubscriptionPlan } from "../models/SubscriptionPlan.js";
+import { prisma } from "../config/database.js";
+import type { User } from "../models/User.js";
+import { planLimitsOf } from "../models/serializers.js";
 import { ApiError } from "../utils/ApiError.js";
 import { config } from "../config/index.js";
 import { getIntSetting } from "./settings.service.js";
@@ -38,18 +39,18 @@ const PREMIUM_LIMITS = {
   aiOptimization: true,
 };
 
-const isPremium = (user: IUser) => user.subscription.plan === "premium" && user.subscription.status === "active";
+const isPremium = (user: User) => user.subscriptionPlan === "premium" && user.subscriptionStatus === "active";
 
 /**
  * Effective limits for a user. Base values come from the plan documents (Admin ->
  * Plans), falling back to built-in defaults. The MAX_* and AI_DAILY_QUOTA_* keys in
  * Admin -> Settings override them when set; AI_DAILY_QUOTA_* default to env values.
  */
-export const getUserLimits = async (user: IUser): Promise<PlanLimits> => {
+export const getUserLimits = async (user: User): Promise<PlanLimits> => {
   const premium = isPremium(user);
   const tier = premium ? "PREMIUM" : "FREE";
-  const plan = await SubscriptionPlan.findOne({ slug: premium ? "premium" : "free" }).lean();
-  const base = { ...(premium ? PREMIUM_LIMITS : FREE_LIMITS), ...(plan?.limits ?? {}) };
+  const plan = await prisma.subscriptionPlan.findUnique({ where: { slug: premium ? "premium" : "free" } });
+  const base = { ...(premium ? PREMIUM_LIMITS : FREE_LIMITS), ...(plan ? planLimitsOf(plan) : {}) };
 
   return {
     ...base,
@@ -72,25 +73,26 @@ const nextBdMidnight = (date = new Date()) => {
 };
 
 /** Resets the monthly and daily counters when their period has rolled over. */
-const rollOverUsage = async (user: IUser) => {
+const rollOverUsage = async (user: User) => {
   const now = new Date();
-  const lastReset = new Date(user.usage.lastAiReset);
-  let changed = false;
+  const lastReset = new Date(user.lastAiReset);
+  const changes: Partial<Pick<User, "aiRequestsThisMonth" | "lastAiReset" | "aiDayKey" | "aiRequestsToday">> = {};
   if (now.getMonth() !== lastReset.getMonth() || now.getFullYear() !== lastReset.getFullYear()) {
-    user.usage.aiRequestsThisMonth = 0;
-    user.usage.lastAiReset = now;
-    changed = true;
+    changes.aiRequestsThisMonth = 0;
+    changes.lastAiReset = now;
   }
   const today = bdDayKey(now);
-  if (user.usage.aiDayKey !== today) {
-    user.usage.aiDayKey = today;
-    user.usage.aiRequestsToday = 0;
-    changed = true;
+  if (user.aiDayKey !== today) {
+    changes.aiDayKey = today;
+    changes.aiRequestsToday = 0;
   }
-  if (changed) await user.save();
+  if (Object.keys(changes).length) {
+    await prisma.user.update({ where: { id: user.id }, data: changes });
+    Object.assign(user, changes);
+  }
 };
 
-export const checkResumeLimit = async (user: IUser, currentCount: number): Promise<void> => {
+export const checkResumeLimit = async (user: User, currentCount: number): Promise<void> => {
   const limits = await getUserLimits(user);
   if (limits.maxResumes !== -1 && currentCount >= limits.maxResumes) {
     throw new ApiError(
@@ -100,14 +102,14 @@ export const checkResumeLimit = async (user: IUser, currentCount: number): Promi
   }
 };
 
-export const checkAiLimit = async (user: IUser): Promise<void> => {
+export const checkAiLimit = async (user: User): Promise<void> => {
   const limits = await getUserLimits(user);
   await rollOverUsage(user);
 
-  if (limits.maxAiRequests !== -1 && user.usage.aiRequestsThisMonth >= limits.maxAiRequests) {
+  if (limits.maxAiRequests !== -1 && user.aiRequestsThisMonth >= limits.maxAiRequests) {
     throw new ApiError(403, "Monthly AI request limit reached. Upgrade to Premium for more.");
   }
-  if (limits.dailyAiRequests !== -1 && (user.usage.aiRequestsToday ?? 0) >= limits.dailyAiRequests) {
+  if (limits.dailyAiRequests !== -1 && (user.aiRequestsToday ?? 0) >= limits.dailyAiRequests) {
     throw new ApiError(
       429,
       `You've used today's ${limits.dailyAiRequests} AI requests. The limit resets at midnight (Bangladesh time).`
@@ -116,20 +118,15 @@ export const checkAiLimit = async (user: IUser): Promise<void> => {
 };
 
 /** Counts one AI request. Atomic, so parallel requests can't undercount. */
-export const incrementAiUsage = async (user: IUser): Promise<void> => {
+export const incrementAiUsage = async (user: User): Promise<void> => {
   const today = bdDayKey();
-  const updated = await User.findOneAndUpdate(
-    { _id: user._id },
-    { $inc: { "usage.aiRequestsThisMonth": 1, "usage.aiRequestsToday": 1 }, $set: { "usage.aiDayKey": today } },
-    { new: true, projection: { usage: 1 } }
-  ).lean();
-  if (updated) {
-    // Keep the in-memory document in step without marking the paths modified
-    user.usage.aiRequestsThisMonth = updated.usage.aiRequestsThisMonth;
-    user.usage.aiRequestsToday = updated.usage.aiRequestsToday;
-    user.usage.aiDayKey = today;
-    user.unmarkModified("usage");
-  }
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: { aiRequestsThisMonth: { increment: 1 }, aiRequestsToday: { increment: 1 }, aiDayKey: today },
+    select: { aiRequestsThisMonth: true, aiRequestsToday: true, aiDayKey: true },
+  });
+  // Keep the caller's copy in step
+  Object.assign(user, updated);
 };
 
 export interface AiQuota {
@@ -142,20 +139,20 @@ export interface AiQuota {
   watermarkPdf: boolean;
 }
 
-export const getAiQuota = async (user: IUser): Promise<AiQuota> => {
+export const getAiQuota = async (user: User): Promise<AiQuota> => {
   const limits = await getUserLimits(user);
   await rollOverUsage(user);
   return {
     dailyLimit: limits.dailyAiRequests,
-    usedToday: user.usage.aiRequestsToday ?? 0,
+    usedToday: user.aiRequestsToday ?? 0,
     monthlyLimit: limits.maxAiRequests,
-    usedThisMonth: user.usage.aiRequestsThisMonth,
+    usedThisMonth: user.aiRequestsThisMonth,
     resetsAt: nextBdMidnight().toISOString(),
     watermarkPdf: limits.watermarkPdf,
   };
 };
 
-export const checkFeatureAccess = async (user: IUser, feature: FeatureFlag): Promise<void> => {
+export const checkFeatureAccess = async (user: User, feature: FeatureFlag): Promise<void> => {
   const limits = await getUserLimits(user);
   if (!limits[feature]) {
     throw new ApiError(403, `This feature requires a Premium subscription.`);
@@ -163,7 +160,7 @@ export const checkFeatureAccess = async (user: IUser, feature: FeatureFlag): Pro
 };
 
 export const activatePremium = async (
-  user: IUser,
+  user: User,
   billingCycle: "monthly" | "yearly"
 ): Promise<void> => {
   const expiresAt = new Date();
@@ -172,8 +169,7 @@ export const activatePremium = async (
   } else {
     expiresAt.setMonth(expiresAt.getMonth() + 1);
   }
-  user.subscription.plan = "premium";
-  user.subscription.status = "active";
-  user.subscription.expiresAt = expiresAt;
-  await user.save();
+  const data = { subscriptionPlan: "premium", subscriptionStatus: "active", subscriptionExpiresAt: expiresAt } as const;
+  await prisma.user.update({ where: { id: user.id }, data });
+  Object.assign(user, data);
 };

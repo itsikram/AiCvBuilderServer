@@ -1,0 +1,381 @@
+// MySQL schema for the AI CV Builder BD API. The connection URL comes from
+// DATABASE_URL (see prisma.config.ts); the app connects through the MariaDB
+// driver adapter, which works with both MySQL and MariaDB.
+//
+// Ids are strings so rows migrated from MongoDB keep their 24-hex ObjectId values
+// (scripts/migrate-from-mongo.ts); new rows get a cuid.
+// Nested CV data (content, theme, section order) is stored as JSON, as the
+// editor always reads and writes it whole.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum UserRole {
+  user
+  admin
+}
+
+enum Language {
+  en
+  bn
+}
+
+enum PlanTier {
+  free
+  premium
+}
+
+enum SubscriptionStatus {
+  active
+  cancelled
+  expired
+  trial
+}
+
+enum ThemePreference {
+  light
+  dark
+  system
+}
+
+enum ResumeFormat {
+  international
+  bangladeshi
+  ats
+}
+
+enum TemplateCategory {
+  ats
+  modern
+  bangladeshi
+  creative
+}
+
+enum PaymentProvider {
+  sslcommerz
+  bkash
+  nagad
+}
+
+enum PaymentStatus {
+  pending
+  completed
+  failed
+  cancelled
+  refunded
+}
+
+enum BillingCycle {
+  monthly
+  yearly
+}
+
+enum DiscountType {
+  percentage
+  fixed
+}
+
+enum PageId {
+  home
+  about
+  contact
+  pricing
+  blog
+}
+
+model User {
+  id                       String             @id @default(cuid()) @db.VarChar(36)
+  name                     String             @db.VarChar(191)
+  email                    String             @unique @db.VarChar(191)
+  password                 String?            @db.VarChar(191)
+  avatar                   String?            @db.Text
+  googleId                 String?            @db.VarChar(191)
+  role                     UserRole           @default(user)
+  language                 Language           @default(en)
+  isEmailVerified          Boolean            @default(false)
+  emailVerificationToken   String?            @db.VarChar(128)
+  emailVerificationExpires DateTime?
+  passwordResetToken       String?            @db.VarChar(128)
+  passwordResetExpires     DateTime?
+  subscriptionPlan         PlanTier           @default(free)
+  subscriptionStatus       SubscriptionStatus @default(active)
+  subscriptionExpiresAt    DateTime?
+  resumesCreated           Int                @default(0)
+  aiRequestsThisMonth      Int                @default(0)
+  lastAiReset              DateTime           @default(now())
+  /// AI requests made on aiDayKey, a Bangladesh-time date (YYYY-MM-DD)
+  aiRequestsToday          Int                @default(0)
+  aiDayKey                 String?            @db.VarChar(10)
+  referralCode             String             @unique @db.VarChar(32)
+  referredById             String?            @db.VarChar(36)
+  referralCount            Int                @default(0)
+  theme                    ThemePreference    @default(system)
+  lastLoginAt              DateTime?
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+
+  referredBy     User?           @relation("Referrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals      User[]          @relation("Referrals")
+  resumes        Resume[]
+  coverLetters   CoverLetter[]
+  payments       Payment[]
+  blogs          Blog[]
+  adminSettings  AdminSetting[]
+  paymentConfigs PaymentConfig[]
+
+  @@index([googleId])
+  @@index([emailVerificationToken])
+  @@index([passwordResetToken])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Resume {
+  id                   String       @id @default(cuid()) @db.VarChar(36)
+  userId               String       @db.VarChar(36)
+  title                String       @db.VarChar(255)
+  slug                 String       @db.VarChar(255)
+  templateId           String       @default("modern-ats") @db.VarChar(80)
+  format               ResumeFormat @default(ats)
+  content              Json
+  atsScore             Int?
+  atsFeedback          Json?
+  isPublic             Boolean      @default(false)
+  publicSlug           String?      @unique @db.VarChar(255)
+  language             Language     @default(en)
+  theme                Json
+  sectionOrder         Json
+  lastExportedAt       DateTime?
+  viewCount            Int          @default(0)
+  uploadedResumeText   String?      @db.LongText
+  uploadedFileName     String?      @db.VarChar(255)
+  uploadedFilePath     String?      @db.VarChar(500)
+  uploadedFileUrl      String?      @db.Text
+  uploadedFileMimeType String?      @db.VarChar(191)
+  uploadedFileSize     Int?
+  uploadedAt           DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coverLetters CoverLetter[]
+
+  @@index([userId, createdAt])
+  @@index([userId, updatedAt])
+  @@map("resumes")
+}
+
+model CoverLetter {
+  id          String   @id @default(cuid()) @db.VarChar(36)
+  userId      String   @db.VarChar(36)
+  title       String   @db.VarChar(255)
+  companyName String   @db.VarChar(255)
+  jobTitle    String   @db.VarChar(255)
+  content     String   @db.Text
+  language    Language @default(en)
+  resumeId    String?  @db.VarChar(36)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume Resume? @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+
+  @@index([userId, updatedAt])
+  @@map("cover_letters")
+}
+
+model Payment {
+  id                String          @id @default(cuid()) @db.VarChar(36)
+  /// Null once the user is deleted; the payment record is kept
+  userId            String?         @db.VarChar(36)
+  planSlug          String          @db.VarChar(80)
+  billingCycle      BillingCycle
+  amount            Float
+  currency          String          @default("BDT") @db.VarChar(8)
+  provider          PaymentProvider
+  status            PaymentStatus   @default(pending)
+  transactionId     String          @unique @db.VarChar(191)
+  providerSessionId String?         @db.VarChar(191)
+  providerData      Json?
+  couponCode        String?         @db.VarChar(40)
+  discountAmount    Float           @default(0)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([provider, status, createdAt])
+  @@map("payments")
+}
+
+model SubscriptionPlan {
+  id               String   @id @default(cuid()) @db.VarChar(36)
+  name             String   @db.VarChar(100)
+  slug             String   @unique @db.VarChar(80)
+  description      String   @default("") @db.Text
+  priceMonthly     Float
+  priceYearly      Float
+  currency         String   @default("BDT") @db.VarChar(8)
+  features         Json
+  maxResumes       Int      @default(2)
+  maxAiRequests    Int      @default(5)
+  watermarkPdf     Boolean  @default(true)
+  premiumTemplates Boolean  @default(false)
+  atsChecker       Boolean  @default(false)
+  coverLetters     Boolean  @default(false)
+  aiOptimization   Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("subscription_plans")
+}
+
+model Coupon {
+  id              String       @id @default(cuid()) @db.VarChar(36)
+  code            String       @unique @db.VarChar(40)
+  description     String       @default("") @db.VarChar(500)
+  discountType    DiscountType
+  discountValue   Float
+  maxUses         Int          @default(100)
+  usedCount       Int          @default(0)
+  validFrom       DateTime     @default(now())
+  validUntil      DateTime
+  applicablePlans Json
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@map("coupons")
+}
+
+model Template {
+  id           String           @id @default(cuid()) @db.VarChar(36)
+  name         String           @db.VarChar(100)
+  slug         String           @unique @db.VarChar(80)
+  description  String           @default("") @db.Text
+  category     TemplateCategory @default(ats)
+  thumbnail    String           @default("") @db.VarChar(500)
+  isPremium    Boolean          @default(false)
+  isActive     Boolean          @default(true)
+  defaultTheme Json
+  layout       String           @default("single-column") @db.VarChar(40)
+  sortOrder    Int              @default(0)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("templates")
+}
+
+model Blog {
+  id              String    @id @default(cuid()) @db.VarChar(36)
+  title           String    @db.VarChar(255)
+  slug            String    @unique @db.VarChar(255)
+  excerpt         String    @db.Text
+  content         String    @db.LongText
+  coverImage      String?   @db.Text
+  /// Null once the author is deleted
+  authorId        String?   @db.VarChar(36)
+  tags            Json
+  language        Language  @default(en)
+  isPublished     Boolean   @default(false)
+  publishedAt     DateTime?
+  metaTitle       String?   @db.VarChar(255)
+  metaDescription String?   @db.Text
+  viewCount       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([isPublished, publishedAt])
+  @@index([slug, language])
+  @@map("blogs")
+}
+
+model ContactMessage {
+  id        String   @id @default(cuid()) @db.VarChar(36)
+  name      String   @db.VarChar(100)
+  email     String   @db.VarChar(200)
+  message   String   @db.Text
+  ip        String?  @db.VarChar(64)
+  handled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("contact_messages")
+}
+
+model PageContent {
+  id        String   @id @default(cuid()) @db.VarChar(36)
+  pageId    PageId
+  language  Language @default(en)
+  content   Json
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([pageId, language])
+  @@map("page_contents")
+}
+
+/// Manual payment numbers (bKash, Nagad) shown on the Billing page. Each admin
+/// update adds a row and deactivates the previous one, so changes keep a history.
+model PaymentConfig {
+  id           String          @id @default(cuid()) @db.VarChar(36)
+  provider     PaymentProvider @default(bkash)
+  number       String?         @db.VarChar(40)
+  instructions String          @default("") @db.Text
+  enabled      Boolean         @default(true)
+  isActive     Boolean         @default(true)
+  updatedById  String?         @db.VarChar(36)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([provider, isActive, updatedAt])
+  @@map("payment_configs")
+}
+
+model AdminSetting {
+  id          String   @id @default(cuid()) @db.VarChar(36)
+  key         String   @unique @db.VarChar(100)
+  value       String   @default("") @db.Text
+  updatedById String?  @db.VarChar(36)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("admin_settings")
+}
+
+/// One row per day of site-wide counters
+model Analytics {
+  id                 String   @id @default(cuid()) @db.VarChar(36)
+  date               DateTime @unique @db.Date
+  newUsers           Int      @default(0)
+  activeUsers        Int      @default(0)
+  resumesCreated     Int      @default(0)
+  resumesUploaded    Int      @default(0)
+  aiRequests         Int      @default(0)
+  pdfExports         Int      @default(0)
+  revenue            Float    @default(0)
+  premiumConversions Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("analytics")
+}
