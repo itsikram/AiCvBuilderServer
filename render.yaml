@@ -16,8 +16,16 @@ services:
         value: https://aicvbuilderbd.online
       - key: COOKIE_SAME_SITE
         value: none
-      # mysql://USER:PASSWORD@HOST:3306/DATABASE; the MySQL server must accept connections from Render
-      - key: DATABASE_URL
+      # MySQL connection; the server must accept connections from Render
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: 3306
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
         sync: false
       - key: JWT_SECRET
         sync: false

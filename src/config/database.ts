@@ -3,7 +3,7 @@ import { PrismaClient } from "../generated/prisma/client.js";
 import { config } from "./index.js";
 
 // The MariaDB driver adapter speaks the MySQL protocol, so it serves MySQL and MariaDB alike
-const adapter = new PrismaMariaDb(config.databaseUrl);
+const adapter = new PrismaMariaDb(config.db);
 
 export const prisma = new PrismaClient({ adapter });
 

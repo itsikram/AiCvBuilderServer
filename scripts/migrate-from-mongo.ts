@@ -1,7 +1,8 @@
 // One-off copy of the old MongoDB data into MySQL.
 //
-//   MONGODB_URI="mongodb+srv://..." DATABASE_URL="mysql://..." npm run migrate:mongo
+//   MONGODB_URI="mongodb+srv://..." npm run migrate:mongo
 //
+// MySQL is the one in DB_HOST, DB_PORT, DB_NAME, DB_USER and DB_PASSWORD.
 // Apply the schema first (npm run db:deploy). Rows keep their MongoDB ObjectId as id,
 // so links between them survive. Rows that already exist are skipped, so the script
 // can be re-run after a partial failure. MongoDB is only read, never changed.

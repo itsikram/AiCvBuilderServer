@@ -95,7 +95,11 @@ cp .env.example .env
 Edit `.env` with your credentials (minimum):
 
 ```env
-DATABASE_URL=mysql://root:password@localhost:3306/aicvbuilderbd
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=aicvbuilderbd
+DB_USER=root
+DB_PASSWORD=your-mysql-password
 JWT_SECRET=your-32-char-minimum-secret-key-here
 JWT_REFRESH_SECRET=your-32-char-refresh-secret-key
 GEMINI_API_KEY=your-gemini-api-key
@@ -179,7 +183,7 @@ See [docs/API.md](docs/API.md) for full endpoint reference.
    calling `*.onrender.com`), set `COOKIE_SAME_SITE=none` so the refresh-token cookie is
    sent cross-site. Browsers that block third-party cookies (Safari, some privacy modes)
    will still drop it; serving the API from `api.<your-domain>` avoids that.
-4. Set `DATABASE_URL` to a MySQL database that accepts connections from Render (cPanel MySQL
+4. Set `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` to a MySQL database that accepts connections from Render (cPanel MySQL
    needs Remote MySQL access for Render's outbound IPs). The start command runs
    `npm run db:deploy` first, so new migrations apply on deploy. Redis is optional: without `REDIS_URL` (or with
    `DISABLE_REDIS=true`) the cache falls back to process memory, which suits a single process.
@@ -206,7 +210,7 @@ The API used MongoDB until October 2026. To copy an existing MongoDB database in
 
 ```bash
 npm run db:deploy
-MONGODB_URI="mongodb+srv://..." DATABASE_URL="mysql://..." npm run migrate:mongo
+MONGODB_URI="mongodb+srv://..." npm run migrate:mongo   # writes to the DB_* database
 ```
 
 Rows keep their MongoDB ids, so public CV links and references between records survive.

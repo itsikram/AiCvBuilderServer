@@ -34,7 +34,11 @@ services:
     env_file:
       - ./.env
     environment:
-      DATABASE_URL: mysql://root:changeme@mysql:3306/aicvbuilderbd
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: aicvbuilderbd
+      DB_USER: root
+      DB_PASSWORD: changeme
     depends_on:
       - mysql
       - redis

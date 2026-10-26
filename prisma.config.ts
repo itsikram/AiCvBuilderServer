@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
+import { dbSettingsFromEnv, dbUrl } from "./src/config/db.js";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
@@ -8,8 +9,8 @@ export default defineConfig({
     seed: "tsx src/scripts/seed.ts",
   },
   datasource: {
-    // Generating the client needs no database, so a placeholder keeps `prisma generate`
-    // working in builds that have no DATABASE_URL yet
-    url: process.env.DATABASE_URL || "mysql://user:password@localhost:3306/aicvbuilderbd",
+    // Built from DB_HOST, DB_PORT, DB_NAME, DB_USER and DB_PASSWORD. `prisma generate`
+    // never connects, so builds without them still work.
+    url: dbUrl(dbSettingsFromEnv()),
   },
 });

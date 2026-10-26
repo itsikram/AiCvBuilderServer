@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { z } from "zod";
+import { dbSettingsFromEnv } from "./db.js";
 
 dotenv.config();
 
@@ -10,7 +11,11 @@ const envSchema = z.object({
   SITE_URL: z.string().url().optional(),
   ALLOWED_ORIGINS: z.string().optional(),
   COOKIE_DOMAIN: z.string().optional(),
-  DATABASE_URL: z.string().regex(/^mysql:\/\//,"must be a mysql:// connection string"),
+  DB_HOST: z.string().min(1),
+  DB_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+  DB_NAME: z.string().min(1),
+  DB_USER: z.string().min(1),
+  DB_PASSWORD: z.string().optional(),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default("7d"),
   JWT_REFRESH_SECRET: z.string().min(32),
@@ -102,7 +107,7 @@ export const config = {
     : process.env.NODE_ENV === "production"
       ? "none"
       : "lax") as "lax" | "strict" | "none",
-  databaseUrl: process.env.DATABASE_URL || "mysql://root@localhost:3306/aicvbuilderbd",
+  db: dbSettingsFromEnv(),
   jwt: {
     secret: process.env.JWT_SECRET || "dev-secret-change-me-in-production-32chars",
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
