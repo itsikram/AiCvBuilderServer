@@ -114,6 +114,12 @@ export const config = {
     refreshSecret: process.env.JWT_REFRESH_SECRET || "dev-refresh-secret-change-me-32chars",
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d",
   },
+  // Verified accounts with these emails are promoted to admin when they sign in.
+  // AUTO_ADMIN_EMAILS (comma-separated) replaces the built-in owner address.
+  autoAdminEmails: (process.env.AUTO_ADMIN_EMAILS || "mdikram295@gmail.com")
+    .split(",")
+    .map(email => email.trim().toLowerCase())
+    .filter(email => email.length > 0),
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID || "",
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",

@@ -27,7 +27,15 @@ const refreshCookieOptions = {
 
 const normalizeEmail = (email: unknown) => String(email ?? "").trim().toLowerCase();
 
-const sendTokens = (res: Response, user: User) => {
+// Only verified emails qualify, so nobody can claim admin by registering the address first.
+const promoteAutoAdmin = async (user: User) => {
+  if (user.role === "admin" || !user.isEmailVerified) return user;
+  if (!config.autoAdminEmails.includes(user.email.toLowerCase())) return user;
+  return prisma.user.update({ where: { id: user.id }, data: { role: "admin" } });
+};
+
+const sendTokens = async (res: Response, current: User) => {
+  const user = await promoteAutoAdmin(current);
   const payload = {
     userId: user.id,
     email: user.email,
@@ -113,7 +121,7 @@ export const register = asyncHandler(async (req: AuthRequest, res: Response) => 
   await sendVerificationEmail(email, name, verificationToken);
   await trackEvent("newUsers");
 
-  sendTokens(res, user);
+  await sendTokens(res, user);
 });
 
 export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -126,7 +134,7 @@ export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
   const user = await prisma.user.update({ where: { id: found.id }, data: { lastLoginAt: new Date() } });
   await trackEvent("activeUsers");
 
-  sendTokens(res, user);
+  await sendTokens(res, user);
 });
 
 export const googleLogin = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -166,7 +174,7 @@ export const googleLogin = asyncHandler(async (req: AuthRequest, res: Response) 
     });
   }
 
-  sendTokens(res, user);
+  await sendTokens(res, user);
 });
 
 export const refreshToken = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -178,7 +186,7 @@ export const refreshToken = asyncHandler(async (req: AuthRequest, res: Response)
   const user = await prisma.user.findUnique({ where: { id: payload.userId } });
   if (!user) throw new ApiError(401, "User not found");
 
-  sendTokens(res, user);
+  await sendTokens(res, user);
 });
 
 export const logout = asyncHandler(async (_req: AuthRequest, res: Response) => {
