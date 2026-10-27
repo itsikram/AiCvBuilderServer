@@ -10,7 +10,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsc",
     "build:server": "prisma generate && tsc",
-    "start": "node dist/index.js",
+    "start": "npm run db:prepare || echo Database setup failed, starting anyway && node dist/index.js",
     "package:cpanel": "npm run build && node scripts/package-cpanel.mjs",
     "seed": "tsx src/scripts/seed.ts",
     "seed:prod": "node dist/scripts/seed.js",
@@ -19,6 +19,7 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:prepare": "prisma migrate deploy && node dist/scripts/seed.js",
     "db:studio": "prisma studio",
     "migrate:mongo": "tsx scripts/migrate-from-mongo.ts"
   },

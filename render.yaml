@@ -6,8 +6,8 @@ services:
     name: aicvbuilderbd-server
     runtime: node
     buildCommand: npm ci && npm run build
-    # Applies pending Prisma migrations before each start; a no-op when the schema is current
-    startCommand: npm run db:deploy && npm start
+    # npm start applies pending migrations and seeds missing default data first
+    startCommand: npm start
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV

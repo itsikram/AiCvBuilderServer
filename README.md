@@ -184,8 +184,8 @@ See [docs/API.md](docs/API.md) for full endpoint reference.
    sent cross-site. Browsers that block third-party cookies (Safari, some privacy modes)
    will still drop it; serving the API from `api.<your-domain>` avoids that.
 4. Set `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` to a MySQL database that accepts connections from Render (cPanel MySQL
-   needs Remote MySQL access for Render's outbound IPs). The start command runs
-   `npm run db:deploy` first, so new migrations apply on deploy. Redis is optional: without `REDIS_URL` (or with
+   needs Remote MySQL access for Render's outbound IPs).
+   `npm start` applies pending migrations and seeds missing default data first (`npm run db:prepare`). Redis is optional: without `REDIS_URL` (or with
    `DISABLE_REDIS=true`) the cache falls back to process memory, which suits a single process.
 
 For GoDaddy/cPanel hosting (Node.js App or static frontend + API elsewhere) see the client repository's
