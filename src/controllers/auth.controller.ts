@@ -12,6 +12,7 @@ import { sendVerificationEmail, sendPasswordResetEmail } from "../services/email
 import { trackEvent } from "../services/analytics.service.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
 import { normalizeLanguage } from "../utils/language.js";
+import { qualifiesForAutoAdmin } from "../utils/autoAdmin.js";
 
 const googleClient = config.google.clientId
   ? new OAuth2Client(config.google.clientId)
@@ -27,10 +28,9 @@ const refreshCookieOptions = {
 
 const normalizeEmail = (email: unknown) => String(email ?? "").trim().toLowerCase();
 
-// Only verified emails qualify, so nobody can claim admin by registering the address first.
 const promoteAutoAdmin = async (user: User) => {
-  if (user.role === "admin" || !user.isEmailVerified) return user;
-  if (!config.autoAdminEmails.includes(user.email.toLowerCase())) return user;
+  if (!qualifiesForAutoAdmin(user, config.autoAdminEmails)) return user;
+  console.log(`Auto-admin: promoted ${user.email}`);
   return prisma.user.update({ where: { id: user.id }, data: { role: "admin" } });
 };
 
@@ -148,6 +148,8 @@ export const googleLogin = asyncHandler(async (req: AuthRequest, res: Response) 
   });
   const payload = ticket.getPayload();
   if (!payload?.email) throw new ApiError(400, "Invalid Google token");
+  // Linking marks the account verified (and may make it admin), so Google must vouch for the email
+  if (payload.email_verified === false) throw new ApiError(400, "Your Google email address is not verified");
   const email = normalizeEmail(payload.email);
 
   let user = await prisma.user.findFirst({ where: { OR: [{ googleId: payload.sub }, { email }] } });
@@ -159,7 +161,7 @@ export const googleLogin = asyncHandler(async (req: AuthRequest, res: Response) 
         email,
         googleId: payload.sub,
         avatar: payload.picture,
-        isEmailVerified: payload.email_verified ?? true,
+        isEmailVerified: true,
         referralCode: newReferralCode(),
         lastLoginAt: new Date(),
       },
@@ -225,10 +227,11 @@ export const verifyEmail = asyncHandler(async (req: AuthRequest, res: Response) 
   });
   if (!user) throw new ApiError(400, "Invalid or expired verification token");
 
-  await prisma.user.update({
+  const verified = await prisma.user.update({
     where: { id: user.id },
     data: { isEmailVerified: true, emailVerificationToken: null, emailVerificationExpires: null },
   });
+  await promoteAutoAdmin(verified);
 
   res.json({ success: true, message: "Email verified successfully" });
 });
@@ -266,10 +269,19 @@ export const resetPassword = asyncHandler(async (req: AuthRequest, res: Response
   });
   if (!user) throw new ApiError(400, "Invalid or expired reset token");
 
-  await prisma.user.update({
+  // The reset link was emailed, so using it proves the address too
+  const updated = await prisma.user.update({
     where: { id: user.id },
-    data: { password: await hashPassword(password), passwordResetToken: null, passwordResetExpires: null },
+    data: {
+      password: await hashPassword(password),
+      passwordResetToken: null,
+      passwordResetExpires: null,
+      isEmailVerified: true,
+      emailVerificationToken: null,
+      emailVerificationExpires: null,
+    },
   });
+  await promoteAutoAdmin(updated);
 
   res.json({ success: true, message: "Password reset successful" });
 });

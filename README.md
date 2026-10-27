@@ -118,7 +118,8 @@ npm run seed
 Changing the schema: edit `prisma/schema.prisma`, then `npm run db:migrate -- --name <change>`
 creates and applies a new migration (commit it). `npm run db:studio` opens a data browser.
 
-Admin user: set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`, then run `npm run seed`.
+Admin user: set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`, then run `npm run seed` (`npm start` runs it too). An existing
+non-admin account with that email is promoted, marked verified and given that password.
 
 ### 4. Run development
 

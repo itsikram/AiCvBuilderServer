@@ -419,13 +419,27 @@ async function seed() {
   // Admin credentials come from env only; nothing is hardcoded or printed.
   const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD;
+  if (adminPassword !== undefined && adminPassword.length < 10) {
+    throw new Error("ADMIN_PASSWORD must be at least 10 characters");
+  }
   let admin = adminEmail
     ? await prisma.user.findUnique({ where: { email: adminEmail } })
     : await prisma.user.findFirst({ where: { role: "admin" } });
-  if (!admin && adminEmail && adminPassword) {
-    if (adminPassword.length < 10) {
-      throw new Error("ADMIN_PASSWORD must be at least 10 characters");
-    }
+  if (admin && admin.role !== "admin" && adminEmail && adminPassword) {
+    // An account that signed up with ADMIN_EMAIL (e.g. before email delivery worked) becomes the
+    // admin. Its password is replaced, so whoever registered the address cannot keep signing in.
+    admin = await prisma.user.update({
+      where: { id: admin.id },
+      data: {
+        role: "admin",
+        isEmailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationExpires: null,
+        password: await hashPassword(adminPassword),
+      },
+    });
+    console.log(`Existing account promoted to admin: ${adminEmail}`);
+  } else if (!admin && adminEmail && adminPassword) {
     admin = await prisma.user.create({
       data: {
         name: "Admin",
