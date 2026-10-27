@@ -118,7 +118,8 @@ export const register = asyncHandler(async (req: AuthRequest, res: Response) => 
     },
   });
 
-  await sendVerificationEmail(email, name, verificationToken);
+  // The account already exists, so a failed email must not turn sign-up into an error
+  await sendVerificationEmail(email, name, verificationToken).catch(() => undefined);
   await trackEvent("newUsers");
 
   await sendTokens(res, user);
@@ -248,7 +249,11 @@ export const forgotPassword = asyncHandler(async (req: AuthRequest, res: Respons
       passwordResetExpires: new Date(Date.now() + 60 * 60 * 1000),
     },
   });
-  await sendPasswordResetEmail(email, user.name, resetToken);
+  try {
+    await sendPasswordResetEmail(email, user.name, resetToken);
+  } catch {
+    throw new ApiError(503, "We couldn't send the reset email right now. Please try again later.");
+  }
 
   res.json({ success: true, message: "If email exists, reset link sent" });
 });
