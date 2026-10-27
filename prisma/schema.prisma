@@ -221,7 +221,7 @@ model SubscriptionPlan {
   id               String   @id @default(cuid()) @db.VarChar(36)
   name             String   @db.VarChar(100)
   slug             String   @unique @db.VarChar(80)
-  description      String   @default("") @db.Text
+  description      String   @db.Text
   priceMonthly     Float
   priceYearly      Float
   currency         String   @default("BDT") @db.VarChar(8)
@@ -263,7 +263,7 @@ model Template {
   id           String           @id @default(cuid()) @db.VarChar(36)
   name         String           @db.VarChar(100)
   slug         String           @unique @db.VarChar(80)
-  description  String           @default("") @db.Text
+  description  String           @db.Text
   category     TemplateCategory @default(ats)
   thumbnail    String           @default("") @db.VarChar(500)
   isPremium    Boolean          @default(false)
@@ -336,7 +336,7 @@ model PaymentConfig {
   id           String          @id @default(cuid()) @db.VarChar(36)
   provider     PaymentProvider @default(bkash)
   number       String?         @db.VarChar(40)
-  instructions String          @default("") @db.Text
+  instructions String          @db.Text
   enabled      Boolean         @default(true)
   isActive     Boolean         @default(true)
   updatedById  String?         @db.VarChar(36)
@@ -352,7 +352,7 @@ model PaymentConfig {
 model AdminSetting {
   id          String   @id @default(cuid()) @db.VarChar(36)
   key         String   @unique @db.VarChar(100)
-  value       String   @default("") @db.Text
+  value       String   @db.Text
   updatedById String?  @db.VarChar(36)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

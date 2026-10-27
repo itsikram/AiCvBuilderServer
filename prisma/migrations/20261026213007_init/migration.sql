@@ -1,5 +1,5 @@
 -- CreateTable
-CREATE TABLE `users` (
+CREATE TABLE IF NOT EXISTS `users` (
     `id` VARCHAR(36) NOT NULL,
     `name` VARCHAR(191) NOT NULL,
     `email` VARCHAR(191) NOT NULL,
@@ -39,7 +39,7 @@ CREATE TABLE `users` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `resumes` (
+CREATE TABLE IF NOT EXISTS `resumes` (
     `id` VARCHAR(36) NOT NULL,
     `userId` VARCHAR(36) NOT NULL,
     `title` VARCHAR(255) NOT NULL,
@@ -73,7 +73,7 @@ CREATE TABLE `resumes` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `cover_letters` (
+CREATE TABLE IF NOT EXISTS `cover_letters` (
     `id` VARCHAR(36) NOT NULL,
     `userId` VARCHAR(36) NOT NULL,
     `title` VARCHAR(255) NOT NULL,
@@ -90,7 +90,7 @@ CREATE TABLE `cover_letters` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `payments` (
+CREATE TABLE IF NOT EXISTS `payments` (
     `id` VARCHAR(36) NOT NULL,
     `userId` VARCHAR(36) NULL,
     `planSlug` VARCHAR(80) NOT NULL,
@@ -114,11 +114,11 @@ CREATE TABLE `payments` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `subscription_plans` (
+CREATE TABLE IF NOT EXISTS `subscription_plans` (
     `id` VARCHAR(36) NOT NULL,
     `name` VARCHAR(100) NOT NULL,
     `slug` VARCHAR(80) NOT NULL,
-    `description` TEXT NOT NULL DEFAULT '',
+    `description` TEXT NOT NULL,
     `priceMonthly` DOUBLE NOT NULL,
     `priceYearly` DOUBLE NOT NULL,
     `currency` VARCHAR(8) NOT NULL DEFAULT 'BDT',
@@ -140,7 +140,7 @@ CREATE TABLE `subscription_plans` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `coupons` (
+CREATE TABLE IF NOT EXISTS `coupons` (
     `id` VARCHAR(36) NOT NULL,
     `code` VARCHAR(40) NOT NULL,
     `description` VARCHAR(500) NOT NULL DEFAULT '',
@@ -160,11 +160,11 @@ CREATE TABLE `coupons` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `templates` (
+CREATE TABLE IF NOT EXISTS `templates` (
     `id` VARCHAR(36) NOT NULL,
     `name` VARCHAR(100) NOT NULL,
     `slug` VARCHAR(80) NOT NULL,
-    `description` TEXT NOT NULL DEFAULT '',
+    `description` TEXT NOT NULL,
     `category` ENUM('ats', 'modern', 'bangladeshi', 'creative') NOT NULL DEFAULT 'ats',
     `thumbnail` VARCHAR(500) NOT NULL DEFAULT '',
     `isPremium` BOOLEAN NOT NULL DEFAULT false,
@@ -181,7 +181,7 @@ CREATE TABLE `templates` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `blogs` (
+CREATE TABLE IF NOT EXISTS `blogs` (
     `id` VARCHAR(36) NOT NULL,
     `title` VARCHAR(255) NOT NULL,
     `slug` VARCHAR(255) NOT NULL,
@@ -206,7 +206,7 @@ CREATE TABLE `blogs` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `contact_messages` (
+CREATE TABLE IF NOT EXISTS `contact_messages` (
     `id` VARCHAR(36) NOT NULL,
     `name` VARCHAR(100) NOT NULL,
     `email` VARCHAR(200) NOT NULL,
@@ -220,7 +220,7 @@ CREATE TABLE `contact_messages` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `page_contents` (
+CREATE TABLE IF NOT EXISTS `page_contents` (
     `id` VARCHAR(36) NOT NULL,
     `pageId` ENUM('home', 'about', 'contact', 'pricing', 'blog') NOT NULL,
     `language` ENUM('en', 'bn') NOT NULL DEFAULT 'en',
@@ -234,11 +234,11 @@ CREATE TABLE `page_contents` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `payment_configs` (
+CREATE TABLE IF NOT EXISTS `payment_configs` (
     `id` VARCHAR(36) NOT NULL,
     `provider` ENUM('sslcommerz', 'bkash', 'nagad') NOT NULL DEFAULT 'bkash',
     `number` VARCHAR(40) NULL,
-    `instructions` TEXT NOT NULL DEFAULT '',
+    `instructions` TEXT NOT NULL,
     `enabled` BOOLEAN NOT NULL DEFAULT true,
     `isActive` BOOLEAN NOT NULL DEFAULT true,
     `updatedById` VARCHAR(36) NULL,
@@ -250,10 +250,10 @@ CREATE TABLE `payment_configs` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `admin_settings` (
+CREATE TABLE IF NOT EXISTS `admin_settings` (
     `id` VARCHAR(36) NOT NULL,
     `key` VARCHAR(100) NOT NULL,
-    `value` TEXT NOT NULL DEFAULT '',
+    `value` TEXT NOT NULL,
     `updatedById` VARCHAR(36) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
@@ -263,7 +263,7 @@ CREATE TABLE `admin_settings` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `analytics` (
+CREATE TABLE IF NOT EXISTS `analytics` (
     `id` VARCHAR(36) NOT NULL,
     `date` DATE NOT NULL,
     `newUsers` INTEGER NOT NULL DEFAULT 0,

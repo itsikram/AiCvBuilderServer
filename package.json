@@ -19,7 +19,7 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:prepare": "prisma migrate deploy && node dist/scripts/seed.js",
+    "db:prepare": "node scripts/migrate.mjs && node dist/scripts/seed.js",
     "db:studio": "prisma studio",
     "migrate:mongo": "tsx scripts/migrate-from-mongo.ts"
   },

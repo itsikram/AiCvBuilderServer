@@ -349,7 +349,7 @@ export const manageTemplates = asyncHandler(async (req: AuthRequest, res: Respon
     return;
   }
   const template = await prisma.template.create({
-    data: { defaultTheme: {}, ...templateData(req.body) } as Prisma.TemplateCreateInput,
+    data: { defaultTheme: {}, description: "", ...templateData(req.body) } as Prisma.TemplateCreateInput,
   });
   res.status(201).json({ success: true, data: serializeTemplate(template) });
 });
