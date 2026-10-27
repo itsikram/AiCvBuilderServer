@@ -1,5 +1,5 @@
 import { GoogleGenAI, ThinkingLevel, type GenerateContentConfig } from "@google/genai";
-import { config } from "../../config/index.js";
+import { config, DEFAULT_GEMINI_MODEL } from "../../config/index.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { geminiKeyManager } from "./gemini-key-manager.js";
 import type { AiSchema } from "./schema.js";
@@ -63,6 +63,22 @@ const thinkingConfigFor = (model: string): GenerateContentConfig["thinkingConfig
   return undefined;
 };
 
+/**
+ * Models that answered "not found / no longer available" in this process. Google retires
+ * model ids (gemini-2.5-flash-lite stopped working in Oct 2026), so a stale GEMINI_MODEL
+ * would otherwise cost a failed call on every request.
+ */
+const unavailableModels = new Set<string>();
+
+/** GEMINI_MODEL, then GEMINI_FALLBACK_MODEL, then the built-in default, skipping retired ones. */
+const modelChain = () => {
+  const all = [config.gemini.model, config.gemini.fallbackModel, DEFAULT_GEMINI_MODEL].filter(
+    (m, i, list): m is string => Boolean(m) && list.indexOf(m) === i
+  );
+  const usable = all.filter((m) => !unavailableModels.has(m));
+  return usable.length > 0 ? usable : all;
+};
+
 export interface GenerateJsonOptions<T> {
   system: string;
   prompt: string;
@@ -83,15 +99,13 @@ const userMessages = {
 /**
  * Calls Gemini with structured JSON output and validates the result against the
  * schema. Retries 429/5xx/timeouts with exponential backoff and jitter, rotates
- * keys, disables rejected keys, and falls back to GEMINI_FALLBACK_MODEL when the
- * primary model is unavailable. Errors reaching users never include provider details.
+ * keys, disables rejected keys, and falls back to GEMINI_FALLBACK_MODEL and then the
+ * built-in default model when the primary model is unavailable. Errors reaching users never include provider details.
  */
 export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<T> {
   if (geminiKeyManager.total === 0) throw new ApiError(503, userMessages.notConfigured);
 
-  const models = [config.gemini.model, config.gemini.fallbackModel].filter(
-    (m, i, all): m is string => Boolean(m) && all.indexOf(m) === i
-  );
+  const models = modelChain();
   let modelIndex = 0;
   const maxAttempts = Math.max(1, config.gemini.maxRetries + 1) + geminiKeyManager.total;
   const triedKeys = new Set<number>();
@@ -166,6 +180,7 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
           triedKeys.add(picked.index);
           break;
         case "model_unavailable":
+          unavailableModels.add(model);
           if (modelIndex < models.length - 1) {
             modelIndex += 1;
             console.warn(`[ai] model ${model} unavailable, falling back to ${models[modelIndex]}`);

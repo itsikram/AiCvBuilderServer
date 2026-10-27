@@ -24,7 +24,7 @@ GEMINI_API_KEYS=key1,key2,key3,key4,key5
 
 # Or keep both - GEMINI_API_KEYS takes precedence
 GEMINI_API_KEY=fallback-key
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.5-flash-lite
 ```
 
 ## How It Works

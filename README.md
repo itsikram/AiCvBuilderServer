@@ -197,7 +197,7 @@ For GoDaddy/cPanel hosting (Node.js App or static frontend + API elsewhere) see 
 - `GEMINI_API_KEYS`: comma-separated keys; requests rotate between them. Rate-limited keys cool down for a
   minute; invalid or leaked keys are disabled for 6 hours and logged by index (keys are never logged).
 - `GEMINI_MODEL` (default `gemini-3.5-flash-lite`), optional `GEMINI_FALLBACK_MODEL` used if the main
-  model is retired, `GEMINI_TIMEOUT_MS`, `GEMINI_MAX_RETRIES` (429/5xx/timeouts, exponential backoff).
+  model is retired (the default model is always tried last, so a retired `GEMINI_MODEL` no longer breaks AI), `GEMINI_TIMEOUT_MS`, `GEMINI_MAX_RETRIES` (429/5xx/timeouts, exponential backoff).
 - Every AI answer is requested as JSON with a schema and validated with zod before use.
 
 ### Frontend

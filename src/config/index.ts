@@ -24,7 +24,7 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GEMINI_API_KEY: z.string().optional().default(""),
   GEMINI_API_KEYS: z.string().optional().default(""),
-  GEMINI_MODEL: z.string().default("gemini-3.5-flash-lite"),
+  GEMINI_MODEL: z.string().optional(),
   GEMINI_FALLBACK_MODEL: z.string().optional(),
   GEMINI_BASE_URL: z.string().url().optional(),
   GEMINI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).optional(),
@@ -62,6 +62,9 @@ if (!parsed.success) {
     process.exit(1);
   }
 }
+
+// Current GA Flash-Lite. Also the last-resort fallback when GEMINI_MODEL is retired.
+export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 
 const stripSlash = (url: string) => url.replace(/\/+$/, "");
 
@@ -130,8 +133,8 @@ export const config = {
       .split(",")
       .map(key => key.trim())
       .filter(key => key.length > 0),
-    model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
-    fallbackModel: process.env.GEMINI_FALLBACK_MODEL || "",
+    model: process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL,
+    fallbackModel: process.env.GEMINI_FALLBACK_MODEL?.trim() || "",
     baseUrl: process.env.GEMINI_BASE_URL || "",
     timeoutMs: Number(process.env.GEMINI_TIMEOUT_MS) || 30_000,
     maxRetries: process.env.GEMINI_MAX_RETRIES !== undefined ? Number(process.env.GEMINI_MAX_RETRIES) : 3,
