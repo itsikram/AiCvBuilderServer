@@ -18,9 +18,9 @@ const pool = mariadb.createPool({
   acquireTimeout: 20_000,
   // DB_SSL=true for servers that require TLS (certificates are verified)
   ...(process.env.DB_SSL === "true" ? { ssl: true } : {}),
-  // MySQL 8's caching_sha2_password without TLS needs the server's RSA key; opt in with
-  // DB_ALLOW_PUBLIC_KEY_RETRIEVAL=true when the error says "RSA public key is not available"
-  allowPublicKeyRetrieval: process.env.DB_ALLOW_PUBLIC_KEY_RETRIEVAL === "true",
+  // MySQL 8's caching_sha2_password without TLS needs the server's RSA key, otherwise every
+  // login fails with ER_CANNOT_RETRIEVE_RSA_KEY; DB_ALLOW_PUBLIC_KEY_RETRIEVAL=false turns it off
+  allowPublicKeyRetrieval: process.env.DB_ALLOW_PUBLIC_KEY_RETRIEVAL?.trim().toLowerCase() !== "false",
 });
 
 type DatabaseState = "disconnected" | "connected" | "connecting";
