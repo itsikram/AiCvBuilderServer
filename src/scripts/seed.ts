@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import dotenv from "dotenv";
 import { connectDatabase, disconnectDatabase, prisma } from "../config/database.js";
 import { hashPassword } from "../models/User.js";
@@ -447,7 +448,10 @@ async function seed() {
         password: await hashPassword(adminPassword),
         role: "admin",
         isEmailVerified: true,
-        referralCode: "CVADMIN001",
+        // CVADMIN001 is taken when another admin already exists
+        referralCode: (await prisma.user.findUnique({ where: { referralCode: "CVADMIN001" } }))
+          ? `CV${randomBytes(4).toString("hex").toUpperCase()}`
+          : "CVADMIN001",
       },
     });
     console.log(`Admin created: ${adminEmail}`);
