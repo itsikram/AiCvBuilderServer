@@ -16,6 +16,7 @@ import {
 import {
   getSetting,
   invalidateSettings,
+  resolveDefault,
   SETTING_DEFINITIONS,
   SETTING_GROUPS,
   settingDefinition,
@@ -25,6 +26,7 @@ import {
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
+import { apiOriginOf } from "../utils/requestOrigin.js";
 import { getDashboardStats } from "../services/analytics.service.js";
 import { geminiKeyManager } from "../services/ai/gemini-key-manager.js";
 import { testGeminiKeys } from "../services/ai/gemini.client.js";
@@ -558,7 +560,8 @@ const normalizeSettingValue = (definition: SettingDefinition, raw: unknown): str
   }
 };
 
-export const getAdminSettings = asyncHandler(async (_req: AuthRequest, res: Response) => {
+export const getAdminSettings = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const context = { apiOrigin: apiOriginOf(req) };
   const rows = await prisma.adminSetting.findMany({
     include: { updatedBy: { select: { name: true } } },
   });
@@ -569,8 +572,9 @@ export const getAdminSettings = asyncHandler(async (_req: AuthRequest, res: Resp
       const row = [definition.key, ...(definition.aliases ?? [])]
         .map((name) => rowsByKey.get(name))
         .find((candidate) => candidate?.value.trim());
-      const source = await settingSource(definition.key);
-      const current = (await getSetting(definition.key)) ?? "";
+      const source = await settingSource(definition.key, context);
+      const defaultValue = await resolveDefault(definition.key, context);
+      const current = (await getSetting(definition.key)) || defaultValue;
       const secret = definition.type === "secret";
       return {
         key: definition.key,
@@ -578,8 +582,11 @@ export const getAdminSettings = asyncHandler(async (_req: AuthRequest, res: Resp
         label: definition.label,
         type: definition.type,
         help: definition.help,
+        placeholder: definition.placeholder,
         secret,
+        /** The value in use: saved, from the environment, or the default */
         value: secret ? "" : current,
+        defaultValue: secret ? "" : defaultValue,
         preview: secret && current ? secretPreview(current) : undefined,
         isSet: Boolean(current),
         source,

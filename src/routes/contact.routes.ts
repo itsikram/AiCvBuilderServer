@@ -6,6 +6,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { prisma } from "../config/database.js";
 import { sendEmail, escapeHtml } from "../services/email.service.js";
 import { config } from "../config/index.js";
+import { getSetting } from "../services/settings.service.js";
 
 const contactSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -33,7 +34,7 @@ router.post(
     const { name, email, message } = req.body as z.infer<typeof contactSchema>;
     await prisma.contactMessage.create({ data: { name, email: email.toLowerCase(), message, ip: req.ip } });
 
-    const to = process.env.CONTACT_EMAIL || process.env.SUPPORT_EMAIL;
+    const to = (await getSetting("CONTACT_EMAIL")) || (await getSetting("SUPPORT_EMAIL"));
     if (to) {
       sendEmail(
         to,

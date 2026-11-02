@@ -60,9 +60,11 @@ export const initiateSSLCommerzPayment = async (
   userId: string,
   planSlug: string,
   billingCycle: "monthly" | "yearly",
-  couponCode?: string
+  couponCode?: string,
+  /** This API's public origin, which completes the default IPN URL */
+  apiOrigin?: string
 ) => {
-  const ssl = await integrations.sslcommerz();
+  const ssl = await integrations.sslcommerz({ apiOrigin });
   if (!ssl.storeId || !ssl.storePass) {
     throw new ApiError(503, "Payment gateway not configured");
   }

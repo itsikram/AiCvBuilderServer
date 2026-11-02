@@ -1,5 +1,6 @@
 import { prisma } from "../config/database.js";
-import { DEFAULT_GEMINI_MODEL } from "../config/index.js";
+import { config, DEFAULT_GEMINI_MODEL } from "../config/index.js";
+import { BUILT_IN_PLAN_LIMITS } from "./planDefaults.js";
 
 // Admin-editable settings (Admin -> Settings) are read on hot paths such as every AI
 // request, so they are cached in process memory for a minute. Updates through the
@@ -13,6 +14,11 @@ import { DEFAULT_GEMINI_MODEL } from "../config/index.js";
 
 export type SettingType = "text" | "secret" | "number" | "boolean" | "textarea" | "url";
 
+/** What a default may depend on: the API's public origin, known from the request being served. */
+export interface DefaultContext {
+  apiOrigin?: string;
+}
+
 export interface SettingDefinition {
   key: string;
   group: string;
@@ -23,7 +29,30 @@ export interface SettingDefinition {
   aliases?: string[];
   /** Read from the environment when nothing is saved (defaults to true). */
   envFallback?: boolean;
+  /**
+   * Used when nothing is saved and no environment variable is set. A string is a fixed
+   * default that getSetting() returns; a function is a derived default (plan values,
+   * URLs built from the site's address) that its consumer resolves with resolveDefault().
+   */
+  default?: string | ((context: DefaultContext) => string | Promise<string>);
+  /** Example shown in an empty input when there is no sensible default (account-specific values). */
+  placeholder?: string;
 }
+
+const SUPPORT_ADDRESS = "support@aicvbuilderbd.online";
+
+/** A plan's limit as set in Admin -> Plans, else the built-in value. */
+const planLimit = (slug: "free" | "premium", field: "maxResumes" | "maxAiRequests") => async () => {
+  try {
+    const plan = await prisma.subscriptionPlan.findUnique({ where: { slug }, select: { maxResumes: true, maxAiRequests: true } });
+    if (plan) return String(plan[field]);
+  } catch (error) {
+    console.warn(`Could not read the ${slug} plan: ${(error as Error).message}`);
+  }
+  return String(BUILT_IN_PLAN_LIMITS[slug][field]);
+};
+
+const billingPage = (result: string) => () => `${config.clientUrl}/dashboard/billing?payment=${result}`;
 
 export const SETTING_GROUPS = [
   { id: "site", title: "Site", description: "Branding and contact details" },
@@ -38,55 +67,62 @@ export const SETTING_GROUPS = [
 ] as const;
 
 export const SETTING_DEFINITIONS: SettingDefinition[] = [
-  { key: "SITE_NAME", group: "site", label: "Site name", type: "text", envFallback: false },
-  { key: "SITE_TAGLINE", group: "site", label: "Site tagline", type: "text", envFallback: false },
-  { key: "SUPPORT_EMAIL", group: "site", label: "Support email", type: "text", envFallback: false },
-  { key: "CONTACT_EMAIL", group: "site", label: "Contact email", type: "text", envFallback: false },
-  { key: "COMPANY_NAME", group: "site", label: "Company name", type: "text", envFallback: false },
-  { key: "COMPANY_ADDRESS", group: "site", label: "Company address", type: "text", envFallback: false },
-  { key: "COMPANY_PHONE", group: "site", label: "Company phone", type: "text", envFallback: false },
-  { key: "DEFAULT_CURRENCY", group: "site", label: "Default currency", type: "text", envFallback: false },
-  { key: "TAX_RATE", group: "site", label: "Tax rate (%)", type: "number", envFallback: false },
+  { key: "SITE_NAME", group: "site", label: "Site name", type: "text", envFallback: false, default: config.app.name },
+  { key: "SITE_TAGLINE", group: "site", label: "Site tagline", type: "text", envFallback: false, default: "Free AI CV maker for jobs in Bangladesh" },
+  { key: "SUPPORT_EMAIL", group: "site", label: "Support email", type: "text", default: SUPPORT_ADDRESS },
+  { key: "CONTACT_EMAIL", group: "site", label: "Contact email", type: "text", help: "Contact-form messages are emailed here", default: SUPPORT_ADDRESS },
+  { key: "COMPANY_NAME", group: "site", label: "Company name", type: "text", envFallback: false, default: config.app.name },
+  { key: "COMPANY_ADDRESS", group: "site", label: "Company address", type: "text", envFallback: false, default: "Dhaka, Bangladesh" },
+  { key: "COMPANY_PHONE", group: "site", label: "Company phone", type: "text", envFallback: false, placeholder: "+880 1XXX-XXXXXX" },
+  { key: "DEFAULT_CURRENCY", group: "site", label: "Default currency", type: "text", envFallback: false, default: "BDT" },
+  { key: "TAX_RATE", group: "site", label: "Tax rate (%)", type: "number", envFallback: false, default: "0" },
 
-  { key: "MAX_RESUMES_FREE", group: "limits", label: "Max resumes (Free)", type: "number", envFallback: false },
-  { key: "MAX_AI_REQUESTS_FREE", group: "limits", label: "Max AI requests per month (Free)", type: "number", envFallback: false },
-  { key: "AI_DAILY_QUOTA_FREE", group: "limits", label: "AI requests per day (Free)", type: "number" },
-  { key: "MAX_RESUMES_PREMIUM", group: "limits", label: "Max resumes (Premium)", type: "number", envFallback: false },
-  { key: "MAX_AI_REQUESTS_PREMIUM", group: "limits", label: "Max AI requests per month (Premium)", type: "number", envFallback: false },
-  { key: "AI_DAILY_QUOTA_PREMIUM", group: "limits", label: "AI requests per day (Premium)", type: "number" },
-  { key: "REFERRAL_BONUS_AMOUNT", group: "limits", label: "Referral bonus amount", type: "number", envFallback: false },
+  { key: "MAX_RESUMES_FREE", group: "limits", label: "Max resumes (Free)", type: "number", envFallback: false, default: planLimit("free", "maxResumes") },
+  { key: "MAX_AI_REQUESTS_FREE", group: "limits", label: "Max AI requests per month (Free)", type: "number", envFallback: false, default: planLimit("free", "maxAiRequests") },
+  { key: "AI_DAILY_QUOTA_FREE", group: "limits", label: "AI requests per day (Free)", type: "number", default: "10" },
+  { key: "MAX_RESUMES_PREMIUM", group: "limits", label: "Max resumes (Premium)", type: "number", envFallback: false, default: planLimit("premium", "maxResumes") },
+  { key: "MAX_AI_REQUESTS_PREMIUM", group: "limits", label: "Max AI requests per month (Premium)", type: "number", envFallback: false, default: planLimit("premium", "maxAiRequests") },
+  { key: "AI_DAILY_QUOTA_PREMIUM", group: "limits", label: "AI requests per day (Premium)", type: "number", default: "100" },
+  { key: "REFERRAL_BONUS_AMOUNT", group: "limits", label: "Referral bonus amount", type: "number", envFallback: false, default: "0" },
 
-  { key: "GEMINI_API_KEYS", group: "ai", label: "Gemini API keys", type: "secret", help: "Comma-separated", aliases: ["GEMINI_API_KEY"] },
-  { key: "GEMINI_MODEL", group: "ai", label: "Model", type: "text", help: `Empty uses ${DEFAULT_GEMINI_MODEL}. gemini-2.5-* models are retired` },
-  { key: "GEMINI_FALLBACK_MODEL", group: "ai", label: "Fallback model", type: "text", help: `Used when the main model is retired or unavailable; ${DEFAULT_GEMINI_MODEL} is always tried last` },
-  { key: "GEMINI_TIMEOUT_MS", group: "ai", label: "Request timeout (ms)", type: "number" },
-  { key: "GEMINI_MAX_RETRIES", group: "ai", label: "Max retries", type: "number" },
-  { key: "GEMINI_BASE_URL", group: "ai", label: "Gateway base URL", type: "url", help: "Leave empty for Google's endpoint" },
+  { key: "GEMINI_API_KEYS", group: "ai", label: "Gemini API keys", type: "secret", help: "Comma-separated", aliases: ["GEMINI_API_KEY"], placeholder: "AIza..., AIza..." },
+  { key: "GEMINI_MODEL", group: "ai", label: "Model", type: "text", help: "gemini-2.5-* models are retired", default: DEFAULT_GEMINI_MODEL },
+  { key: "GEMINI_FALLBACK_MODEL", group: "ai", label: "Fallback model", type: "text", help: `Used when the main model is retired or unavailable; ${DEFAULT_GEMINI_MODEL} is always tried last`, default: DEFAULT_GEMINI_MODEL },
+  { key: "GEMINI_TIMEOUT_MS", group: "ai", label: "Request timeout (ms)", type: "number", help: "1000 to 120000", default: "30000" },
+  { key: "GEMINI_MAX_RETRIES", group: "ai", label: "Max retries", type: "number", help: "0 to 6", default: "3" },
+  { key: "GEMINI_BASE_URL", group: "ai", label: "Gateway base URL", type: "url", help: "Change only to route requests through a gateway", default: "https://generativelanguage.googleapis.com" },
 
-  { key: "GOOGLE_CLIENT_ID", group: "google", label: "Google client ID", type: "text" },
+  { key: "GOOGLE_CLIENT_ID", group: "google", label: "Google client ID", type: "text", placeholder: "1234567890-abc.apps.googleusercontent.com" },
 
-  { key: "SMTP_HOST", group: "email", label: "SMTP host", type: "text" },
-  { key: "SMTP_PORT", group: "email", label: "SMTP port", type: "number", help: "587 (STARTTLS) or 465 (SSL)" },
-  { key: "SMTP_USER", group: "email", label: "SMTP username", type: "text" },
+  { key: "SMTP_HOST", group: "email", label: "SMTP host", type: "text", help: "Emails are only sent once a username is set too", default: "smtp.gmail.com" },
+  { key: "SMTP_PORT", group: "email", label: "SMTP port", type: "number", help: "587 (STARTTLS) or 465 (SSL)", default: "587" },
+  { key: "SMTP_USER", group: "email", label: "SMTP username", type: "text", placeholder: "noreply@aicvbuilderbd.online" },
   { key: "SMTP_PASS", group: "email", label: "SMTP password", type: "secret" },
-  { key: "EMAIL_FROM", group: "email", label: "From address", type: "text", help: "e.g. AI CV Builder BD <noreply@aicvbuilderbd.online>" },
+  { key: "EMAIL_FROM", group: "email", label: "From address", type: "text", default: "AI CV Builder BD <noreply@aicvbuilderbd.online>" },
 
-  { key: "CLOUDINARY_CLOUD_NAME", group: "storage", label: "Cloud name", type: "text" },
-  { key: "CLOUDINARY_API_KEY", group: "storage", label: "API key", type: "text" },
+  { key: "CLOUDINARY_CLOUD_NAME", group: "storage", label: "Cloud name", type: "text", placeholder: "your-cloud-name" },
+  { key: "CLOUDINARY_API_KEY", group: "storage", label: "API key", type: "text", placeholder: "123456789012345" },
   { key: "CLOUDINARY_API_SECRET", group: "storage", label: "API secret", type: "secret" },
 
-  { key: "SSL_STORE_ID", group: "payments", label: "Store ID", type: "text", aliases: ["SSL_COMMERZ_STORE_ID"] },
+  { key: "SSL_STORE_ID", group: "payments", label: "Store ID", type: "text", aliases: ["SSL_COMMERZ_STORE_ID"], placeholder: "From your SSLCommerz merchant panel" },
   { key: "SSL_STORE_PASS", group: "payments", label: "Store password", type: "secret", aliases: ["SSL_COMMERZ_STORE_PASSWD"] },
-  { key: "SSL_IS_LIVE", group: "payments", label: "Live mode", type: "boolean", help: "Off uses the SSLCommerz sandbox" },
-  { key: "SSL_SUCCESS_URL", group: "payments", label: "Success URL", type: "url" },
-  { key: "SSL_FAIL_URL", group: "payments", label: "Fail URL", type: "url" },
-  { key: "SSL_CANCEL_URL", group: "payments", label: "Cancel URL", type: "url" },
-  { key: "SSL_IPN_URL", group: "payments", label: "IPN URL", type: "url" },
+  { key: "SSL_IS_LIVE", group: "payments", label: "Live mode", type: "boolean", help: "Off uses the SSLCommerz sandbox", default: "false" },
+  { key: "SSL_SUCCESS_URL", group: "payments", label: "Success URL", type: "url", default: billingPage("success") },
+  { key: "SSL_FAIL_URL", group: "payments", label: "Fail URL", type: "url", default: billingPage("failed") },
+  { key: "SSL_CANCEL_URL", group: "payments", label: "Cancel URL", type: "url", default: billingPage("cancelled") },
+  {
+    key: "SSL_IPN_URL",
+    group: "payments",
+    label: "IPN URL",
+    type: "url",
+    help: "SSLCommerz notifies this API address about each payment",
+    default: ({ apiOrigin }) => (apiOrigin ? `${apiOrigin}/api/v1/payments/sslcommerz/ipn` : ""),
+  },
 
   { key: "PDFTXT_API_KEY", group: "pdf", label: "pdftxt.dev API key", type: "secret" },
 
-  { key: "MAINTENANCE_MODE", group: "features", label: "Maintenance mode", type: "boolean", envFallback: false },
-  { key: "REGISTRATION_ENABLED", group: "features", label: "Registration enabled", type: "boolean", envFallback: false },
+  { key: "MAINTENANCE_MODE", group: "features", label: "Maintenance mode", type: "boolean", envFallback: false, default: "false" },
+  { key: "REGISTRATION_ENABLED", group: "features", label: "Registration enabled", type: "boolean", envFallback: false, default: "true" },
 ];
 
 const definitionsByKey = new Map(SETTING_DEFINITIONS.map((d) => [d.key, d]));
@@ -150,13 +186,35 @@ const envValue = (key: string): string | undefined => {
   return undefined;
 };
 
-/** Where a setting's current value comes from: the admin panel, the environment, or nowhere. */
-export const settingSource = async (key: string): Promise<"database" | "env" | "none"> =>
-  (await savedValue(key)) ? "database" : envValue(key) ? "env" : "none";
+const fixedDefault = (key: string): string | undefined => {
+  const value = definitionsByKey.get(key)?.default;
+  return typeof value === "string" ? nonBlank(value) : undefined;
+};
 
-/** The admin-set value, else the environment variable, else undefined. */
+/** A setting's default, fixed or derived ("" when it has none). */
+export const resolveDefault = async (key: string, context: DefaultContext = {}): Promise<string> => {
+  const value = definitionsByKey.get(key)?.default;
+  if (value === undefined) return "";
+  return (typeof value === "string" ? value : await value(context)).trim();
+};
+
+/** Where a setting's current value comes from: the admin panel, the environment, its default, or nowhere. */
+export const settingSource = async (
+  key: string,
+  context: DefaultContext = {}
+): Promise<"database" | "env" | "default" | "none"> => {
+  if (await savedValue(key)) return "database";
+  if (envValue(key)) return "env";
+  return (await resolveDefault(key, context)) ? "default" : "none";
+};
+
+/** The admin-set value, else the environment variable, else the fixed default, else undefined. */
 export const getSetting = async (key: string): Promise<string | undefined> =>
-  (await savedValue(key)) ?? envValue(key);
+  (await savedValue(key)) ?? envValue(key) ?? fixedDefault(key);
+
+/** Like getSetting(), but also resolves a derived default. */
+export const getSettingOrDefault = async (key: string, context: DefaultContext = {}): Promise<string> =>
+  (await getSetting(key)) ?? (await resolveDefault(key, context));
 
 /** An admin-set whole number (>= -1, where -1 means unlimited), else `fallback`. */
 export const getIntSetting = async (key: string, fallback: number): Promise<number> => {
@@ -203,14 +261,15 @@ export const integrations = {
     apiKey: (await getSetting("CLOUDINARY_API_KEY")) || "",
     apiSecret: (await getSetting("CLOUDINARY_API_SECRET")) || "",
   }),
-  sslcommerz: async () => ({
+  /** `context.apiOrigin` (this API's public address) completes the default IPN URL. */
+  sslcommerz: async (context: DefaultContext = {}) => ({
     storeId: (await getSetting("SSL_STORE_ID")) || "",
     storePass: (await getSetting("SSL_STORE_PASS")) || "",
     isLive: await getBoolSetting("SSL_IS_LIVE"),
-    successUrl: (await getSetting("SSL_SUCCESS_URL")) || "",
-    failUrl: (await getSetting("SSL_FAIL_URL")) || "",
-    cancelUrl: (await getSetting("SSL_CANCEL_URL")) || "",
-    ipnUrl: (await getSetting("SSL_IPN_URL")) || "",
+    successUrl: await getSettingOrDefault("SSL_SUCCESS_URL", context),
+    failUrl: await getSettingOrDefault("SSL_FAIL_URL", context),
+    cancelUrl: await getSettingOrDefault("SSL_CANCEL_URL", context),
+    ipnUrl: await getSettingOrDefault("SSL_IPN_URL", context),
   }),
   pdftxt: async () => ({
     apiKey: (await getSetting("PDFTXT_API_KEY")) || "",

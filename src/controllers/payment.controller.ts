@@ -12,6 +12,7 @@ import { prisma } from "../config/database.js";
 import { asJson } from "../models/Resume.js";
 import { serializePayment, serializePaymentConfig, serializePlan } from "../models/serializers.js";
 import { ApiError } from "../utils/ApiError.js";
+import { apiOriginOf } from "../utils/requestOrigin.js";
 
 const normalizeBkashNumber = (value?: string | null) =>
   (value || "").trim().replace(/\s+/g, "").replace(/^\+?880/, "0");
@@ -41,7 +42,8 @@ export const payWithSSLCommerz = asyncHandler(async (req: AuthRequest, res: Resp
     req.user!.userId,
     planSlug,
     billingCycle,
-    couponCode
+    couponCode,
+    apiOriginOf(req)
   );
   res.json({ success: true, data: result });
 });

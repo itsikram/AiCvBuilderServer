@@ -4,6 +4,7 @@ import { planLimitsOf } from "../models/serializers.js";
 import { ApiError } from "../utils/ApiError.js";
 import { config } from "../config/index.js";
 import { getIntSetting } from "./settings.service.js";
+import { BUILT_IN_PLAN_LIMITS } from "./planDefaults.js";
 
 export interface PlanLimits {
   maxResumes: number;
@@ -19,26 +20,6 @@ export interface PlanLimits {
 
 type FeatureFlag = "watermarkPdf" | "premiumTemplates" | "atsChecker" | "coverLetters" | "aiOptimization";
 
-const FREE_LIMITS = {
-  maxResumes: 2,
-  maxAiRequests: 5,
-  watermarkPdf: true,
-  premiumTemplates: false,
-  atsChecker: false,
-  coverLetters: false,
-  aiOptimization: false,
-};
-
-const PREMIUM_LIMITS = {
-  maxResumes: -1,
-  maxAiRequests: 100,
-  watermarkPdf: false,
-  premiumTemplates: true,
-  atsChecker: true,
-  coverLetters: true,
-  aiOptimization: true,
-};
-
 const isPremium = (user: User) => user.subscriptionPlan === "premium" && user.subscriptionStatus === "active";
 
 /**
@@ -50,7 +31,7 @@ export const getUserLimits = async (user: User): Promise<PlanLimits> => {
   const premium = isPremium(user);
   const tier = premium ? "PREMIUM" : "FREE";
   const plan = await prisma.subscriptionPlan.findUnique({ where: { slug: premium ? "premium" : "free" } });
-  const base = { ...(premium ? PREMIUM_LIMITS : FREE_LIMITS), ...(plan ? planLimitsOf(plan) : {}) };
+  const base = { ...BUILT_IN_PLAN_LIMITS[premium ? "premium" : "free"], ...(plan ? planLimitsOf(plan) : {}) };
 
   return {
     ...base,
