@@ -10,6 +10,26 @@ export const SUPPORTED_CV_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ] as const;
 
+type CvMimeType = (typeof SUPPORTED_CV_MIME_TYPES)[number];
+
+// Browsers often send a generic type for .docx (e.g. on Windows without Office), so the extension counts too
+const GENERIC_MIME_TYPES = ["", "application/octet-stream", "binary/octet-stream", "application/zip", "application/x-zip-compressed"];
+const EXTENSION_MIME_TYPES: Record<string, CvMimeType> = { pdf: SUPPORTED_CV_MIME_TYPES[0], docx: SUPPORTED_CV_MIME_TYPES[1] };
+
+/** The CV type an upload claims to be: its MIME type, or its extension when the MIME type is generic. */
+export const resolveCvMimeType = (mimeType: string, fileName: string): CvMimeType | null => {
+  if ((SUPPORTED_CV_MIME_TYPES as readonly string[]).includes(mimeType)) return mimeType as CvMimeType;
+  if (!GENERIC_MIME_TYPES.includes(mimeType)) return null;
+  return EXTENSION_MIME_TYPES[fileName.split(".").pop()?.toLowerCase() ?? ""] ?? null;
+};
+
+/** The type from the file's first bytes, so a mislabelled file is still read correctly. */
+const sniffCvMimeType = (buffer: Buffer): CvMimeType | null => {
+  if (buffer.subarray(0, 1024).includes("%PDF-")) return SUPPORTED_CV_MIME_TYPES[0];
+  if (buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) return SUPPORTED_CV_MIME_TYPES[1];
+  return null;
+};
+
 const normalize = (text: string) =>
   text
     .replace(/\r/g, "")
@@ -50,8 +70,9 @@ const extractDocx = async (buffer: Buffer): Promise<string> => {
  */
 export const extractCvText = async (buffer: Buffer, fileName: string, mimeType: string): Promise<string> => {
   let text = "";
+  const type = sniffCvMimeType(buffer) ?? resolveCvMimeType(mimeType, fileName);
 
-  if (mimeType === "application/pdf") {
+  if (type === SUPPORTED_CV_MIME_TYPES[0]) {
     try {
       text = await extractPdfLocally(buffer);
     } catch (error) {
@@ -65,7 +86,7 @@ export const extractCvText = async (buffer: Buffer, fileName: string, mimeType: 
         console.warn("pdftxt.dev extraction failed:", axios.isAxiosError(error) ? error.response?.status ?? error.code : (error as Error).message);
       }
     }
-  } else if (mimeType === SUPPORTED_CV_MIME_TYPES[1]) {
+  } else if (type === SUPPORTED_CV_MIME_TYPES[1]) {
     try {
       text = await extractDocx(buffer);
     } catch {

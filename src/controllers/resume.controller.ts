@@ -31,7 +31,7 @@ import {
 import { generateResumePDF } from "../services/pdf.service.js";
 import { trackEvent } from "../services/analytics.service.js";
 import { cacheGet, cacheSet } from "../config/redis.js";
-import { extractCvText } from "../services/pdf-extraction.service.js";
+import { extractCvText, resolveCvMimeType } from "../services/pdf-extraction.service.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
 import { updateResumeSchema, type ResumeContentInput } from "../validators/resume.validator.js";
 
@@ -396,7 +396,8 @@ type UploadFields = Pick<
  */
 const importCvText = async (
   user: User,
-  input: { text: string; resumeId?: string; title: string; uploadFields?: UploadFields }
+  // A function runs only after parsing succeeds, so failed imports don't leave stored files behind
+  input: { text: string; resumeId?: string; title: string; uploadFields: UploadFields | (() => Promise<UploadFields>) }
 ) => {
   const resumeId = input.resumeId;
   if (resumeId) await findOwnResume(resumeId, user.id);
@@ -411,7 +412,7 @@ const importCvText = async (
     content: asJson(parsedContent),
     uploadedResumeText: input.text,
     uploadedAt: new Date(),
-    ...input.uploadFields,
+    ...(typeof input.uploadFields === "function" ? await input.uploadFields() : input.uploadFields),
   };
   if (resumeId) {
     return prisma.resume.update({ where: { id: resumeId }, data: fields });
@@ -443,7 +444,7 @@ export const importFromText = asyncHandler(async (req: AuthRequest, res: Respons
     text: req.body.text,
     resumeId: req.body.resumeId,
     title: "Imported CV",
-    uploadFields: { uploadedFileName: null, uploadedFileUrl: null, uploadedFilePath: null },
+    uploadFields: { uploadedFileName: null, uploadedFileUrl: null, uploadedFilePath: null, uploadedFileMimeType: null, uploadedFileSize: null },
   });
   res.json({ success: true, data: { resumeId: resume.id, title: resume.title, content: resume.content } });
 });
@@ -454,30 +455,32 @@ export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: R
   const user = await loadUser(req.user!.userId);
   await checkAiLimit(user);
 
-  const resumeText = await extractCvText(req.file.buffer, req.file.originalname, req.file.mimetype);
-
-  // Keeping the original file is optional: it needs Cloudinary
-  const stored = await uploadBuffer(req.file.buffer, "aicvbuilderbd/resumes", "raw", {
-    resource_type: "raw",
-    use_filename: true,
-    unique_filename: true,
-    filename_override: req.file.originalname,
-  }).catch((error: Error) => {
-    console.warn("Storing uploaded CV failed:", error.message);
-    return null;
-  });
+  const file = req.file;
+  const resumeText = await extractCvText(file.buffer, file.originalname, file.mimetype);
 
   const resumeId = typeof req.body.resumeId === "string" && req.body.resumeId ? req.body.resumeId : undefined;
   const resume = await importCvText(user, {
     text: resumeText,
     resumeId,
-    title: req.file.originalname.replace(/\.(pdf|docx)$/i, "").slice(0, 50) || "Imported CV",
-    uploadFields: {
-      uploadedFileName: req.file.originalname,
-      uploadedFilePath: stored?.publicId ?? null,
-      uploadedFileUrl: stored?.url ?? null,
-      uploadedFileMimeType: req.file.mimetype,
-      uploadedFileSize: req.file.size,
+    title: file.originalname.replace(/\.(pdf|docx)$/i, "").slice(0, 50) || "Imported CV",
+    uploadFields: async () => {
+      // Keeping the original file is optional: it needs Cloudinary
+      const stored = await uploadBuffer(file.buffer, "aicvbuilderbd/resumes", "raw", {
+        resource_type: "raw",
+        use_filename: true,
+        unique_filename: true,
+        filename_override: file.originalname,
+      }).catch((error: Error) => {
+        console.warn("Storing uploaded CV failed:", error.message);
+        return null;
+      });
+      return {
+        uploadedFileName: file.originalname,
+        uploadedFilePath: stored?.publicId ?? null,
+        uploadedFileUrl: stored?.url ?? null,
+        uploadedFileMimeType: resolveCvMimeType(file.mimetype, file.originalname) ?? file.mimetype,
+        uploadedFileSize: file.size,
+      };
     },
   });
 

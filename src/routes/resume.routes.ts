@@ -23,7 +23,7 @@ import {
 import * as resumeAiController from "../controllers/resumeAi.controller.js";
 import { aiLimiter } from "../middleware/rateLimit.middleware.js";
 import multer from "multer";
-import { SUPPORTED_CV_MIME_TYPES } from "../services/pdf-extraction.service.js";
+import { resolveCvMimeType } from "../services/pdf-extraction.service.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -31,7 +31,7 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024,
   },
   fileFilter: (_req, file, cb) => {
-    if (!(SUPPORTED_CV_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+    if (!resolveCvMimeType(file.mimetype, file.originalname)) {
       cb(new Error("Only PDF or Word (.docx) files are supported"));
       return;
     }
