@@ -46,6 +46,11 @@ export const classifyGeminiError = (error: unknown): Failure => {
   return { kind: "fatal", status };
 };
 
+const isTimeout = (error: unknown) => {
+  const name = (error as Error)?.name ?? "";
+  return name === "AbortError" || name === "TimeoutError" || /timeout|timed out|aborted/i.test(String((error as Error)?.message ?? ""));
+};
+
 const clientCache = new Map<string, GoogleGenAI>();
 const clientFor = (key: string, baseUrl: string) => {
   const cacheKey = `${baseUrl}|${key}`;
@@ -57,6 +62,19 @@ const clientFor = (key: string, baseUrl: string) => {
   }
   return client;
 };
+
+/** Gemini 3 and later (and the -latest aliases), which want their default temperature. */
+const isGemini3 = (model: string) => {
+  const major = /^gemini-(\d+)/.exec(model)?.[1];
+  return major ? Number(major) >= 3 : /^gemini-(flash|pro)/.test(model);
+};
+
+/**
+ * Google asks to keep Gemini 3 models at their default temperature (1.0): lower values
+ * can make them loop, which fills the output limit and cuts the JSON off. Older models
+ * get the task's temperature.
+ */
+const temperatureFor = (model: string, requested: number | undefined) => (isGemini3(model) ? undefined : requested ?? 0.4);
 
 /** Low/no thinking keeps flash-lite fast and cheap for short structured writing tasks. */
 const thinkingConfigFor = (model: string): GenerateContentConfig["thinkingConfig"] | undefined => {
@@ -95,17 +113,33 @@ export interface GenerateJsonOptions<T> {
   system: string;
   prompt: string;
   schema: AiSchema<T>;
+  /** Used by models before Gemini 3 only (see temperatureFor) */
   temperature?: number;
   maxOutputTokens?: number;
+  /**
+   * Per-attempt time limit for long answers (CV import, translation); the
+   * GEMINI_TIMEOUT_MS setting applies when it is higher.
+   */
+  attemptTimeoutMs?: number;
+  /**
+   * Total time for the call, retries included, so the user gets a clear message before
+   * the browser gives up (the client waits 120 s for AI tools, 180 s for imports).
+   */
+  deadlineMs?: number;
   /** For logs and metrics only */
   task: string;
 }
+
+const DEFAULT_DEADLINE_MS = 110_000;
+/** Output room when an answer was cut off at maxOutputTokens */
+const MAX_OUTPUT_TOKENS_CAP = 32_768;
 
 const userMessages = {
   notConfigured: "AI features are not available right now. Please try again later.",
   busy: "The AI service is busy right now. Please try again in a minute.",
   failed: "The AI couldn't complete this request. Please try again.",
   invalidOutput: "The AI returned an unexpected answer. Please try again.",
+  tooSlow: "The AI took too long to answer. Please try again, or with a shorter text.",
 };
 
 /**
@@ -125,8 +159,16 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
   const triedKeys = new Set<number>();
   let backoffMs = 800;
   let invalidOutputs = 0;
+  let maxOutputTokens = options.maxOutputTokens ?? 2048;
+  const attemptTimeoutMs = Math.max(settings.timeoutMs, options.attemptTimeoutMs ?? 0);
+  const deadline = Date.now() + (options.deadlineMs ?? DEFAULT_DEADLINE_MS);
+  let timedOut = false;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Leave the last seconds for the response to reach the browser
+    const timeLeft = deadline - Date.now() - 2000;
+    if (timeLeft < 5000) break;
+
     let picked = geminiKeyManager.next(triedKeys);
     if (!picked) {
       // Every key was tried or is cooling down; wait for the soonest one if it's short
@@ -150,14 +192,15 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
           systemInstruction: options.system,
           responseMimeType: "application/json",
           responseJsonSchema: options.schema.json,
-          temperature: options.temperature ?? 0.4,
-          maxOutputTokens: options.maxOutputTokens ?? 2048,
+          temperature: temperatureFor(model, options.temperature),
+          maxOutputTokens,
           thinkingConfig: thinkingConfigFor(model),
-          httpOptions: { timeout: settings.timeoutMs },
+          httpOptions: { timeout: Math.min(attemptTimeoutMs, timeLeft) },
         },
       });
 
       const text = response.text ?? "";
+      const finishReason = response.candidates?.[0]?.finishReason;
       let parsed: unknown;
       try {
         parsed = JSON.parse(text);
@@ -167,7 +210,16 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
       const result = options.schema.zod.safeParse(parsed);
       if (!result.success) {
         invalidOutputs += 1;
-        console.warn(`[ai] ${options.task}: invalid structured output from ${model} (attempt ${attempt + 1})`);
+        // The answer's content is not logged: it can hold a user's CV
+        console.warn(
+          `[ai] ${options.task}: invalid structured output from ${model} (attempt ${attempt + 1}, finish=${finishReason ?? "?"}, ${text.length} chars, ${parsed === undefined ? "not JSON" : "schema mismatch"})`
+        );
+        if (finishReason === "MAX_TOKENS" && maxOutputTokens < MAX_OUTPUT_TOKENS_CAP) {
+          // Cut off mid-answer: give the next attempt more room (does not count as a bad answer)
+          maxOutputTokens = Math.min(MAX_OUTPUT_TOKENS_CAP, maxOutputTokens * 2);
+          invalidOutputs -= 1;
+          continue;
+        }
         if (invalidOutputs >= 2) throw new ApiError(502, userMessages.invalidOutput);
         continue;
       }
@@ -204,7 +256,8 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
           break;
         case "retryable":
           geminiKeyManager.recordFailure(picked.index);
-          await sleep(backoffMs + Math.random() * backoffMs);
+          if (isTimeout(error)) timedOut = true;
+          await sleep(Math.min(backoffMs + Math.random() * backoffMs, Math.max(0, deadline - Date.now() - 7000)));
           backoffMs = Math.min(backoffMs * 2, 8000);
           break;
         case "fatal":
@@ -213,7 +266,7 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
     }
   }
 
-  throw new ApiError(503, userMessages.busy);
+  throw timedOut ? new ApiError(504, userMessages.tooSlow) : new ApiError(503, userMessages.busy);
 }
 
 const testProblems: Record<Failure["kind"], (model: string) => string> = {

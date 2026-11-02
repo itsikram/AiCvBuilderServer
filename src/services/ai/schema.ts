@@ -4,6 +4,12 @@ import { z } from "zod";
  * Tiny schema builder that produces a zod validator and the matching JSON Schema
  * (sent to Gemini as responseJsonSchema) from one definition, so they can't drift.
  * Only the subset Gemini's structured output supports is used.
+ *
+ * Limits (string length, array length, number range) are enforced here, not sent to
+ * Gemini: nested array limits and number bounds multiply the states of Gemini's
+ * constrained decoder, and a big schema such as the CV import is then refused with
+ * "the specified schema produces a constraint that has too many states". So an
+ * over-long answer is trimmed or clamped instead of rejected.
  */
 export interface AiSchema<T> {
   zod: z.ZodType<T>;
@@ -12,20 +18,15 @@ export interface AiSchema<T> {
 
 const make = <T>(zod: z.ZodType<T>, json: Record<string, unknown>): AiSchema<T> => ({ zod, json });
 
-// Limits aren't sent to Gemini, so an over-long string or an out-of-range score is
-// trimmed/clamped instead of rejecting the whole answer (e.g. "O Positive (O+)" as a blood group).
+// e.g. "O Positive (O+)" as a blood group is trimmed rather than failing the whole answer
 export const S = {
   string: (description?: string, max = 4000) =>
     make(z.string().transform((value) => value.slice(0, max)), { type: "string", ...(description ? { description } : {}) }),
 
+  /** Say the range in `description` (e.g. "0-100") so the model knows it. */
   number: (description?: string, min?: number, max?: number) => {
     const schema = z.number().transform((value) => Math.min(max ?? value, Math.max(min ?? value, value)));
-    return make(schema, {
-      type: "number",
-      ...(description ? { description } : {}),
-      ...(min !== undefined ? { minimum: min } : {}),
-      ...(max !== undefined ? { maximum: max } : {}),
-    });
+    return make(schema, { type: "number", ...(description ? { description } : {}) });
   },
 
   enum: <const V extends readonly [string, ...string[]]>(values: V, description?: string) =>
@@ -36,10 +37,9 @@ export const S = {
     }),
 
   array: <T>(item: AiSchema<T>, maxItems = 30, description?: string) =>
-    make(z.array(item.zod).max(maxItems * 2), {
+    make(z.array(item.zod).transform((items) => items.slice(0, maxItems)), {
       type: "array",
       items: item.json,
-      maxItems,
       ...(description ? { description } : {}),
     }),
 

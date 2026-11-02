@@ -291,7 +291,8 @@ class GeminiService {
       system: baseSystem(target),
       schema: translateSchema,
       temperature: 0.2,
-      maxOutputTokens: 8000,
+      maxOutputTokens: 16_000,
+      attemptTimeoutMs: 90_000,
       prompt: [
         `Translate every field into natural, professional ${targetName} for a CV. Return every id exactly once.`,
         "Fields marked (name) are people, employers or institutions: transliterate them into the target script only if",
@@ -373,7 +374,10 @@ class GeminiService {
       system: baseSystem("en").replace(languageNeutral, "Keep every value in the language it appears in the source text."),
       schema: parsedCvSchema,
       temperature: 0,
-      maxOutputTokens: 6000,
+      // A whole CV as JSON: room for long CVs, and time for the answer (the client waits 180 s)
+      maxOutputTokens: 12_000,
+      attemptTimeoutMs: 90_000,
+      deadlineMs: 150_000,
       prompt: [
         "Extract the CV below into the schema. Copy facts exactly; do not invent or embellish.",
         "Use empty strings or empty arrays for anything missing. Dates: YYYY-MM when possible, otherwise as written.",
