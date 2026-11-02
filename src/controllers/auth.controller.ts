@@ -13,10 +13,16 @@ import { trackEvent } from "../services/analytics.service.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
 import { normalizeLanguage } from "../utils/language.js";
 import { qualifiesForAutoAdmin } from "../utils/autoAdmin.js";
+import { integrations } from "../services/settings.service.js";
 
-const googleClient = config.google.clientId
-  ? new OAuth2Client(config.google.clientId)
-  : null;
+// GOOGLE_CLIENT_ID is set in Admin -> Settings (env fallback); the client follows changes
+let googleClient: { clientId: string; client: OAuth2Client } | null = null;
+const getGoogleClient = async () => {
+  const { clientId } = await integrations.google();
+  if (!clientId) return null;
+  if (googleClient?.clientId !== clientId) googleClient = { clientId, client: new OAuth2Client(clientId) };
+  return googleClient;
+};
 
 // clearCookie only matches when these options equal the ones the cookie was set with
 const refreshCookieOptions = {
@@ -139,12 +145,13 @@ export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
 });
 
 export const googleLogin = asyncHandler(async (req: AuthRequest, res: Response) => {
-  if (!googleClient) throw new ApiError(503, "Google login not configured");
+  const google = await getGoogleClient();
+  if (!google) throw new ApiError(503, "Google login not configured");
 
   const { credential } = req.body;
-  const ticket = await googleClient.verifyIdToken({
+  const ticket = await google.client.verifyIdToken({
     idToken: credential,
-    audience: config.google.clientId,
+    audience: google.clientId,
   });
   const payload = ticket.getPayload();
   if (!payload?.email) throw new ApiError(400, "Invalid Google token");

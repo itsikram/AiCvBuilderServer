@@ -5,7 +5,6 @@ import { serializeUser, subscriptionOf } from "../models/User.js";
 import { asJson } from "../models/Resume.js";
 import {
   planLimitsData,
-  serializeAdminSetting,
   serializeBlog,
   serializeCoupon,
   serializePageContent,
@@ -14,12 +13,21 @@ import {
   serializePlan,
   serializeTemplate,
 } from "../models/serializers.js";
-import { invalidateSettings } from "../services/settings.service.js";
+import {
+  getSetting,
+  invalidateSettings,
+  SETTING_DEFINITIONS,
+  SETTING_GROUPS,
+  settingDefinition,
+  settingSource,
+  type SettingDefinition,
+} from "../services/settings.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 import { getDashboardStats } from "../services/analytics.service.js";
 import { geminiKeyManager } from "../services/ai/gemini-key-manager.js";
+import { testGeminiKeys } from "../services/ai/gemini.client.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
 import { normalizeLanguage } from "../utils/language.js";
 import { completePayment } from "../services/payment.service.js";
@@ -398,6 +406,7 @@ export const updateBlog = asyncHandler(async (req: AuthRequest, res: Response) =
 });
 
 export const getGeminiKeyStatus = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  await geminiKeyManager.refresh();
   const keyStats = geminiKeyManager.getKeyStats();
   const availableKeys = geminiKeyManager.getAvailableKeyCount();
 
@@ -412,6 +421,12 @@ export const getGeminiKeyStatus = asyncHandler(async (_req: AuthRequest, res: Re
       })),
     },
   });
+});
+
+export const testGeminiKeyConnection = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const results = await testGeminiKeys();
+  if (results.length === 0) throw new ApiError(400, "No Gemini API key is set. Add one under Gemini AI and save first.");
+  res.json({ success: true, data: { results } });
 });
 
 // Page Content Management (CMS)
@@ -512,132 +527,145 @@ export const getAllPageContents = asyncHandler(async (_req: AuthRequest, res: Re
 });
 
 // Admin Settings Management (for env file values)
-// Allowed settings keys that can be managed via admin panel
-const ALLOWED_SETTINGS_KEYS = [
-  'SITE_NAME',
-  'SITE_TAGLINE',
-  'SUPPORT_EMAIL',
-  'CONTACT_EMAIL',
-  'COMPANY_NAME',
-  'COMPANY_ADDRESS',
-  'COMPANY_PHONE',
-  'DEFAULT_CURRENCY',
-  'TAX_RATE',
-  'REFERRAL_BONUS_AMOUNT',
-  'MAX_RESUMES_FREE',
-  'MAX_AI_REQUESTS_FREE',
-  'MAX_RESUMES_PREMIUM',
-  'MAX_AI_REQUESTS_PREMIUM',
-  'AI_DAILY_QUOTA_FREE',
-  'AI_DAILY_QUOTA_PREMIUM',
-  'MAINTENANCE_MODE',
-  'REGISTRATION_ENABLED',
-  'GOOGLE_CLIENT_ID',
-  'SSL_COMMERZ_STORE_ID',
-  'SSL_COMMERZ_STORE_PASSWD',
-  'SMTP_HOST',
-  'SMTP_PORT',
-  'SMTP_FROM_EMAIL',
-  'SMTP_FROM_NAME',
-  'CLOUDINARY_CLOUD_NAME',
-  'CLOUDINARY_API_KEY',
-  'NAGAD_MERCHANT_NUMBER',
-  'NAGAD_MERCHANT_PASSWORD',
-];
+// Settings managed from Admin -> Settings (see SETTING_DEFINITIONS). Secrets are write-only:
+// they are never sent back to the browser, only whether one is set and its last characters.
+const secretPreview = (value: string) => {
+  const items = value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+  const tail = (item: string) => (item.length >= 12 ? `…${item.slice(-4)}` : "••••");
+  return items.length > 1 ? `${items.length} values (${items.map(tail).join(", ")})` : tail(value);
+};
 
-const SECRET_SETTING = /PASS|SECRET|PRIVATE|API_KEY/;
+const normalizeSettingValue = (definition: SettingDefinition, raw: unknown): string => {
+  const value = raw === undefined || raw === null ? "" : String(raw).trim();
+  if (!value) return "";
+  switch (definition.type) {
+    case "number":
+      if (!/^-?\d+$/.test(value) || Number(value) < -1) {
+        throw new ApiError(400, `${definition.label} must be a whole number`);
+      }
+      return value;
+    case "boolean":
+      return ["true", "1", "yes", "on"].includes(value.toLowerCase()) ? "true" : "false";
+    case "url":
+      try {
+        new URL(value);
+      } catch {
+        throw new ApiError(400, `${definition.label} must be a full URL (https://...)`);
+      }
+      return value.replace(/\/+$/, "");
+    default:
+      return value;
+  }
+};
 
 export const getAdminSettings = asyncHandler(async (_req: AuthRequest, res: Response) => {
-  const settings = await prisma.adminSetting.findMany({
+  const rows = await prisma.adminSetting.findMany({
     include: { updatedBy: { select: { name: true } } },
-    orderBy: { key: "asc" },
   });
+  const rowsByKey = new Map(rows.map((row) => [row.key, row]));
 
-  // Build a map of all settings
-  const settingsMap: Record<string, { value: string; updatedAt: Date; updatedBy?: string }> = {};
-
-  for (const setting of settings) {
-    settingsMap[setting.key] = {
-      value: setting.value,
-      updatedAt: setting.updatedAt,
-      updatedBy: setting.updatedBy?.name,
-    };
-  }
-
-  // Include allowed keys even if not set. Env values are shown as the default, except
-  // secrets, which never leave the server.
-  for (const key of ALLOWED_SETTINGS_KEYS) {
-    if (!settingsMap[key]) {
-      settingsMap[key] = {
-        value: SECRET_SETTING.test(key) ? '' : process.env[key] || '',
-        updatedAt: new Date(),
+  const settings = await Promise.all(
+    SETTING_DEFINITIONS.map(async (definition) => {
+      const row = [definition.key, ...(definition.aliases ?? [])]
+        .map((name) => rowsByKey.get(name))
+        .find((candidate) => candidate?.value.trim());
+      const source = await settingSource(definition.key);
+      const current = (await getSetting(definition.key)) ?? "";
+      const secret = definition.type === "secret";
+      return {
+        key: definition.key,
+        group: definition.group,
+        label: definition.label,
+        type: definition.type,
+        help: definition.help,
+        secret,
+        value: secret ? "" : current,
+        preview: secret && current ? secretPreview(current) : undefined,
+        isSet: Boolean(current),
+        source,
+        updatedAt: source === "database" ? row?.updatedAt : undefined,
+        updatedBy: source === "database" ? row?.updatedBy?.name : undefined,
       };
-    }
-  }
+    })
+  );
 
   res.json({
     success: true,
-    data: settingsMap,
-    allowedKeys: ALLOWED_SETTINGS_KEYS,
+    data: {
+      groups: SETTING_GROUPS.map((group) => ({
+        ...group,
+        settings: settings.filter((setting) => setting.group === group.id),
+      })),
+    },
   });
 });
 
+/**
+ * Saves one setting ({ key, value }) or several ({ settings: { KEY: value } }).
+ * An empty value removes the saved value, so the environment fallback (if any) applies
+ * again; for secrets an empty value means "keep the current one" (use DELETE to clear).
+ */
 export const updateAdminSetting = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { key, value } = req.body;
+  const body = req.body ?? {};
+  const entries: Array<[string, unknown]> =
+    body.settings && typeof body.settings === "object"
+      ? Object.entries(body.settings as Record<string, unknown>)
+      : typeof body.key === "string"
+        ? [[body.key, body.value]]
+        : [];
 
-  if (!key || typeof key !== 'string') {
-    throw new ApiError(400, 'Setting key is required');
-  }
+  if (entries.length === 0) throw new ApiError(400, "Setting key is required");
 
-  if (!ALLOWED_SETTINGS_KEYS.includes(key)) {
-    throw new ApiError(403, `Cannot modify setting: ${key}. Only admin-configurable settings are allowed.`);
-  }
-
-  const data = { value: value !== undefined ? String(value).trim() : '', updatedById: req.user!.userId };
-  const setting = await prisma.adminSetting.upsert({
-    where: { key },
-    create: { key, ...data },
-    update: data,
+  const changes = entries.map(([key, raw]) => {
+    const definition = settingDefinition(key);
+    if (!definition) throw new ApiError(403, `Cannot modify setting: ${key}`);
+    return { definition, value: normalizeSettingValue(definition, raw) };
   });
+
+  const updatedById = req.user!.userId;
+  await prisma.$transaction(
+    changes.flatMap(({ definition, value }) => {
+      if (!value && definition.type === "secret") return [];
+      const legacy = definition.aliases?.length
+        ? [prisma.adminSetting.deleteMany({ where: { key: { in: definition.aliases } } })]
+        : [];
+      if (!value) {
+        return [...legacy, prisma.adminSetting.deleteMany({ where: { key: definition.key } })];
+      }
+      return [
+        ...legacy,
+        prisma.adminSetting.upsert({
+          where: { key: definition.key },
+          create: { key: definition.key, value, updatedById },
+          update: { value, updatedById },
+        }),
+      ];
+    })
+  );
   invalidateSettings();
 
   res.json({
     success: true,
-    data: serializeAdminSetting(setting),
+    message: changes.length === 1 ? "Setting saved" : `${changes.length} settings saved`,
   });
 });
 
 export const deleteAdminSetting = asyncHandler(async (req: AuthRequest, res: Response) => {
   const key = typeof req.params.key === 'string' ? req.params.key : '';
+  const definition = settingDefinition(key);
 
-  if (!key || !ALLOWED_SETTINGS_KEYS.includes(key)) {
+  if (!definition) {
     throw new ApiError(403, `Cannot delete setting: ${key}`);
   }
 
-  const { count } = await prisma.adminSetting.deleteMany({ where: { key } });
+  await prisma.adminSetting.deleteMany({ where: { key: { in: [key, ...(definition.aliases ?? [])] } } });
   invalidateSettings();
-
-  if (!count) {
-    throw new ApiError(404, 'Setting not found');
-  }
 
   res.json({
     success: true,
-    message: 'Setting deleted successfully',
+    message: 'Setting cleared',
   });
 });
-
-// Helper function to get config value with priority: env > admin settings
-export const getConfigValue = (key: string, defaultValue?: string): string => {
-  // First priority: environment variable
-  const envValue = process.env[key];
-  if (envValue !== undefined && envValue !== '') {
-    return envValue;
-  }
-
-  // This will be populated at runtime by caching
-  return defaultValue || '';
-};
 
 // Subscription Plan Management
 export const getSubscriptionPlans = asyncHandler(async (_req: AuthRequest, res: Response) => {

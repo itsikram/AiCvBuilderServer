@@ -1,7 +1,8 @@
 import { GoogleGenAI, ThinkingLevel, type GenerateContentConfig } from "@google/genai";
-import { config, DEFAULT_GEMINI_MODEL } from "../../config/index.js";
+import { DEFAULT_GEMINI_MODEL } from "../../config/index.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { geminiKeyManager } from "./gemini-key-manager.js";
+import { integrations } from "../settings.service.js";
 import type { AiSchema } from "./schema.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -46,12 +47,13 @@ export const classifyGeminiError = (error: unknown): Failure => {
 };
 
 const clientCache = new Map<string, GoogleGenAI>();
-const clientFor = (key: string) => {
-  let client = clientCache.get(key);
+const clientFor = (key: string, baseUrl: string) => {
+  const cacheKey = `${baseUrl}|${key}`;
+  let client = clientCache.get(cacheKey);
   if (!client) {
     // GEMINI_BASE_URL is optional (an API gateway/proxy, or a local stub in tests)
-    client = new GoogleGenAI({ apiKey: key, ...(config.gemini.baseUrl ? { httpOptions: { baseUrl: config.gemini.baseUrl } } : {}) });
-    clientCache.set(key, client);
+    client = new GoogleGenAI({ apiKey: key, ...(baseUrl ? { httpOptions: { baseUrl } } : {}) });
+    clientCache.set(cacheKey, client);
   }
   return client;
 };
@@ -71,8 +73,8 @@ const thinkingConfigFor = (model: string): GenerateContentConfig["thinkingConfig
 const unavailableModels = new Set<string>();
 
 /** GEMINI_MODEL, then GEMINI_FALLBACK_MODEL, then the built-in default, skipping retired ones. */
-const modelChain = () => {
-  const all = [config.gemini.model, config.gemini.fallbackModel, DEFAULT_GEMINI_MODEL].filter(
+const modelChain = (settings: { model: string; fallbackModel: string }) => {
+  const all = [settings.model, settings.fallbackModel, DEFAULT_GEMINI_MODEL].filter(
     (m, i, list): m is string => Boolean(m) && list.indexOf(m) === i
   );
   const usable = all.filter((m) => !unavailableModels.has(m));
@@ -103,11 +105,13 @@ const userMessages = {
  * built-in default model when the primary model is unavailable. Errors reaching users never include provider details.
  */
 export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<T> {
+  await geminiKeyManager.refresh();
   if (geminiKeyManager.total === 0) throw new ApiError(503, userMessages.notConfigured);
 
-  const models = modelChain();
+  const settings = await integrations.gemini();
+  const models = modelChain(settings);
   let modelIndex = 0;
-  const maxAttempts = Math.max(1, config.gemini.maxRetries + 1) + geminiKeyManager.total;
+  const maxAttempts = Math.max(1, settings.maxRetries + 1) + geminiKeyManager.total;
   const triedKeys = new Set<number>();
   let backoffMs = 800;
   let invalidOutputs = 0;
@@ -129,7 +133,7 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
     const model = models[modelIndex];
     const started = Date.now();
     try {
-      const response = await clientFor(picked.key).models.generateContent({
+      const response = await clientFor(picked.key, settings.baseUrl).models.generateContent({
         model,
         contents: options.prompt,
         config: {
@@ -139,7 +143,7 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
           temperature: options.temperature ?? 0.4,
           maxOutputTokens: options.maxOutputTokens ?? 2048,
           thinkingConfig: thinkingConfigFor(model),
-          httpOptions: { timeout: config.gemini.timeoutMs },
+          httpOptions: { timeout: settings.timeoutMs },
         },
       });
 
@@ -200,4 +204,49 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
   }
 
   throw new ApiError(503, userMessages.busy);
+}
+
+const testProblems: Record<Failure["kind"], (model: string) => string> = {
+  rate_limit: () => "Rate limited or out of quota. Check billing and quota for this key's project in Google AI Studio.",
+  key_rejected: () => "Key rejected",
+  model_unavailable: (model) => `Model "${model}" is not available to this key. Change the Model setting.`,
+  retryable: () => "Gemini did not answer (timeout or server error). Try again.",
+  fatal: () => "Gemini rejected the request",
+};
+
+/**
+ * Sends one tiny request per key with the configured model (Admin -> Settings -> Test).
+ * Keys that work are put back in rotation; the result never includes a key.
+ */
+export async function testGeminiKeys() {
+  await geminiKeyManager.refresh();
+  const settings = await integrations.gemini();
+  return Promise.all(
+    geminiKeyManager.all().map(async ({ key, index }) => {
+      const started = Date.now();
+      try {
+        await clientFor(key, settings.baseUrl).models.generateContent({
+          model: settings.model,
+          contents: "Reply with OK.",
+          config: {
+            maxOutputTokens: 16,
+            thinkingConfig: thinkingConfigFor(settings.model),
+            httpOptions: { timeout: settings.timeoutMs },
+          },
+        });
+        geminiKeyManager.reset(index);
+        return { index, ok: true as const, model: settings.model, ms: Date.now() - started };
+      } catch (error) {
+        const failure = classifyGeminiError(error);
+        const problem = failure.kind === "key_rejected" ? `Key rejected: ${failure.reason}` : testProblems[failure.kind](settings.model);
+        return {
+          index,
+          ok: false as const,
+          model: settings.model,
+          problem,
+          detail: redact(String((error as Error)?.message ?? error)).slice(0, 300),
+        };
+      }
+    })
+  );
 }

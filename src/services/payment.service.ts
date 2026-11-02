@@ -1,6 +1,6 @@
 import SSLCommerzPayment from "sslcommerz-lts";
 import { v4 as uuidv4 } from "uuid";
-import { config } from "../config/index.js";
+import { integrations } from "./settings.service.js";
 import { prisma } from "../config/database.js";
 import { asJson } from "../models/Resume.js";
 import { activatePremium } from "./subscription.service.js";
@@ -62,7 +62,8 @@ export const initiateSSLCommerzPayment = async (
   billingCycle: "monthly" | "yearly",
   couponCode?: string
 ) => {
-  if (!config.sslcommerz.storeId || !config.sslcommerz.storePass) {
+  const ssl = await integrations.sslcommerz();
+  if (!ssl.storeId || !ssl.storePass) {
     throw new ApiError(503, "Payment gateway not configured");
   }
 
@@ -88,19 +89,19 @@ export const initiateSSLCommerzPayment = async (
   });
 
   const sslcz = new SSLCommerzPayment(
-    config.sslcommerz.storeId,
-    config.sslcommerz.storePass,
-    config.sslcommerz.isLive
+    ssl.storeId,
+    ssl.storePass,
+    ssl.isLive
   );
 
   const paymentData = {
     total_amount: amount,
     currency: "BDT",
     tran_id: transactionId,
-    success_url: config.sslcommerz.successUrl,
-    fail_url: config.sslcommerz.failUrl,
-    cancel_url: config.sslcommerz.cancelUrl,
-    ipn_url: config.sslcommerz.ipnUrl,
+    success_url: ssl.successUrl,
+    fail_url: ssl.failUrl,
+    cancel_url: ssl.cancelUrl,
+    ipn_url: ssl.ipnUrl,
     shipping_method: "NO",
     product_name: `AI CV Builder BD Premium (${billingCycle})`,
     product_category: "Subscription",

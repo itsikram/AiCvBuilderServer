@@ -1,8 +1,9 @@
-import { config } from "../../config/index.js";
+import { integrations } from "../settings.service.js";
 
 /**
- * Rotates between GEMINI_API_KEYS. Keys are read only from the environment and
- * are never logged or returned by any API: status reports use the key's index.
+ * Rotates between GEMINI_API_KEYS (Admin -> Settings, falling back to the environment).
+ * Keys are never logged or returned by any API: status reports use the key's index.
+ * refresh() picks up keys changed in the admin panel without a restart.
  *
  * - Rate-limited keys (HTTP 429) cool down for a minute.
  * - Rejected keys (invalid, revoked, reported as leaked, project denied) are
@@ -22,18 +23,27 @@ const RATE_LIMIT_COOLDOWN_MS = 60_000;
 const DISABLE_MS = 6 * 60 * 60_000;
 
 class GeminiKeyManager {
-  private keys: KeyState[] = config.gemini.apiKeys.map((key, index) => ({
-    index,
-    key,
-    cooldownUntil: 0,
-    disabledUntil: 0,
-    failures: 0,
-    lastUsedAt: 0,
-  }));
+  private keys: KeyState[] = [];
+  private signature: string | null = null;
 
-  constructor() {
-    if (this.keys.length === 0) console.warn("No Gemini API keys configured (set GEMINI_API_KEYS)");
+  /** Reloads the key list when it changed in Admin -> Settings; kept keys keep their state. */
+  async refresh() {
+    const apiKeys = (await integrations.gemini()).apiKeys;
+    const signature = apiKeys.join(",");
+    if (signature === this.signature) return;
+    const previous = new Map(this.keys.map((k) => [k.key, k]));
+    this.keys = apiKeys.map((key, index) => ({
+      cooldownUntil: 0,
+      disabledUntil: 0,
+      failures: 0,
+      lastUsedAt: 0,
+      ...previous.get(key),
+      index,
+      key,
+    }));
+    if (this.keys.length === 0) console.warn("No Gemini API keys configured (Admin -> Settings -> Gemini AI)");
     else console.log(`Gemini: ${this.keys.length} API key(s) configured`);
+    this.signature = signature;
   }
 
   get total() {
@@ -73,7 +83,7 @@ class GeminiKeyManager {
     if (!key) return;
     key.disabledUntil = Date.now() + DISABLE_MS;
     key.disabledReason = reason;
-    console.error(`Gemini key #${index} disabled for 6h: ${reason}. Replace it in GEMINI_API_KEYS.`);
+    console.error(`Gemini key #${index} disabled for 6h: ${reason}. Replace it in Admin -> Settings.`);
   }
 
   recordFailure(index: number) {
@@ -84,6 +94,21 @@ class GeminiKeyManager {
   recordSuccess(index: number) {
     const key = this.keys[index];
     if (key) key.failures = 0;
+  }
+
+  /** Puts a key back in rotation, e.g. after an admin test shows it works again. */
+  reset(index: number) {
+    const key = this.keys[index];
+    if (!key) return;
+    key.cooldownUntil = 0;
+    key.disabledUntil = 0;
+    key.disabledReason = undefined;
+    key.failures = 0;
+  }
+
+  /** For the admin key test only; never send keys to the browser. */
+  all(): Array<{ key: string; index: number }> {
+    return this.keys.map(({ key, index }) => ({ key, index }));
   }
 
   getKeyStats() {

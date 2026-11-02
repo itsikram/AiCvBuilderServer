@@ -9,6 +9,7 @@ import adminRoutes from "./admin.routes.js";
 import pageContentRoutes from "./pageContent.routes.js";
 import contactRoutes from "./contact.routes.js";
 import { getDatabaseStatus } from "../config/database.js";
+import { integrations } from "../services/settings.service.js";
 
 const router = Router();
 
@@ -21,6 +22,17 @@ router.use("/blogs", blogRoutes);
 router.use("/page-content", pageContentRoutes);
 router.use("/admin", adminRoutes);
 router.use("/contact", contactRoutes);
+
+// Public, non-secret settings the frontend needs at runtime (set in Admin -> Settings)
+router.get("/config", async (_req, res, next) => {
+  try {
+    const { clientId } = await integrations.google();
+    res.set("Cache-Control", "public, max-age=60");
+    res.json({ success: true, data: { googleClientId: clientId } });
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get("/health", (_req, res) => {
   res.json({

@@ -54,6 +54,7 @@ router.get("/blogs", adminController.manageBlogs);
 router.post("/blogs", uploadBlogCover, adminController.createBlog);
 router.patch("/blogs/:id", byId, uploadBlogCover, adminController.updateBlog);
 router.get("/gemini-keys", adminController.getGeminiKeyStatus);
+router.post("/gemini-keys/test", adminController.testGeminiKeyConnection);
 
 // Page Content Management (CMS)
 router.get("/page-content", adminController.getAllPageContents);

@@ -12,14 +12,14 @@ export interface AiSchema<T> {
 
 const make = <T>(zod: z.ZodType<T>, json: Record<string, unknown>): AiSchema<T> => ({ zod, json });
 
+// Limits aren't sent to Gemini, so an over-long string or an out-of-range score is
+// trimmed/clamped instead of rejecting the whole answer (e.g. "O Positive (O+)" as a blood group).
 export const S = {
   string: (description?: string, max = 4000) =>
-    make(z.string().max(max), { type: "string", ...(description ? { description } : {}) }),
+    make(z.string().transform((value) => value.slice(0, max)), { type: "string", ...(description ? { description } : {}) }),
 
   number: (description?: string, min?: number, max?: number) => {
-    let schema = z.number();
-    if (min !== undefined) schema = schema.min(min);
-    if (max !== undefined) schema = schema.max(max);
+    const schema = z.number().transform((value) => Math.min(max ?? value, Math.max(min ?? value, value)));
     return make(schema, {
       type: "number",
       ...(description ? { description } : {}),

@@ -1,5 +1,5 @@
 import axios from "axios";
-import { config } from "../config/index.js";
+import { integrations } from "./settings.service.js";
 import { ApiError } from "../utils/ApiError.js";
 
 const PDFTXT_API_URL = "https://pdftxt.dev";
@@ -26,12 +26,12 @@ const extractPdfLocally = async (buffer: Buffer): Promise<string> => {
 };
 
 /** Optional remote extraction via pdftxt.dev (better for some complex layouts). */
-const extractPdfRemotely = async (buffer: Buffer, fileName: string): Promise<string> => {
+const extractPdfRemotely = async (buffer: Buffer, fileName: string, apiKey: string): Promise<string> => {
   const formData = new FormData();
   const bytes = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
   formData.append("file", new Blob([bytes], { type: "application/pdf" }), fileName);
   const response = await axios.post(`${PDFTXT_API_URL}/extract`, formData, {
-    headers: { "X-API-Key": config.pdftxt.apiKey },
+    headers: { "X-API-Key": apiKey },
     maxBodyLength: 10 * 1024 * 1024,
     timeout: 30_000,
   });
@@ -57,9 +57,10 @@ export const extractCvText = async (buffer: Buffer, fileName: string, mimeType: 
     } catch (error) {
       console.warn("Local PDF extraction failed:", (error as Error).message);
     }
-    if (text.length < MIN_TEXT_LENGTH && config.pdftxt.apiKey) {
+    const { apiKey } = await integrations.pdftxt();
+    if (text.length < MIN_TEXT_LENGTH && apiKey) {
       try {
-        text = await extractPdfRemotely(buffer, fileName);
+        text = await extractPdfRemotely(buffer, fileName, apiKey);
       } catch (error) {
         console.warn("pdftxt.dev extraction failed:", axios.isAxiosError(error) ? error.response?.status ?? error.code : (error as Error).message);
       }

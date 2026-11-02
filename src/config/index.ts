@@ -123,48 +123,10 @@ export const config = {
     .split(",")
     .map(email => email.trim().toLowerCase())
     .filter(email => email.length > 0),
-  google: {
-    clientId: process.env.GOOGLE_CLIENT_ID || "",
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
-  },
-  gemini: {
-    apiKey: process.env.GEMINI_API_KEY || "",
-    apiKeys: (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "")
-      .split(",")
-      .map(key => key.trim())
-      .filter(key => key.length > 0),
-    model: process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL,
-    fallbackModel: process.env.GEMINI_FALLBACK_MODEL?.trim() || "",
-    baseUrl: process.env.GEMINI_BASE_URL || "",
-    timeoutMs: Number(process.env.GEMINI_TIMEOUT_MS) || 30_000,
-    maxRetries: process.env.GEMINI_MAX_RETRIES !== undefined ? Number(process.env.GEMINI_MAX_RETRIES) : 3,
-  },
-  pdftxt: {
-    apiKey: process.env.PDFTXT_API_KEY || "",
-  },
+  // Credentials (Gemini, Google, SMTP, Cloudinary, SSLCommerz, pdftxt) are read through
+  // services/settings.service.ts: Admin -> Settings first, these env variables as fallback.
   redis: {
     url: process.env.REDIS_URL || "",
-  },
-  cloudinary: {
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
-    apiKey: process.env.CLOUDINARY_API_KEY || "",
-    apiSecret: process.env.CLOUDINARY_API_SECRET || "",
-  },
-  email: {
-    host: process.env.SMTP_HOST || "",
-    port: Number(process.env.SMTP_PORT) || 587,
-    user: process.env.SMTP_USER || "",
-    pass: process.env.SMTP_PASS || "",
-    from: process.env.EMAIL_FROM || "AI CV Builder BD <noreply@aicvbuilderbd.online>",
-  },
-  sslcommerz: {
-    storeId: process.env.SSL_STORE_ID || "",
-    storePass: process.env.SSL_STORE_PASS || "",
-    isLive: process.env.SSL_IS_LIVE === "true",
-    successUrl: process.env.SSL_SUCCESS_URL || "",
-    failUrl: process.env.SSL_FAIL_URL || "",
-    cancelUrl: process.env.SSL_CANCEL_URL || "",
-    ipnUrl: process.env.SSL_IPN_URL || "",
   },
   ai: {
     dailyQuotaFree: process.env.AI_DAILY_QUOTA_FREE !== undefined ? Number(process.env.AI_DAILY_QUOTA_FREE) : 10,

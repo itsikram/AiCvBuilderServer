@@ -1,18 +1,20 @@
 import nodemailer from "nodemailer";
 import { config } from "../config/index.js";
+import { integrations } from "./settings.service.js";
 
 export const escapeHtml = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-const createTransporter = () => {
-  if (!config.email.host || !config.email.user) {
+// SMTP credentials come from Admin -> Settings (env fallback), so they are read per email
+const createTransporter = (email: Awaited<ReturnType<typeof integrations.email>>) => {
+  if (!email.host || !email.user) {
     return null;
   }
   return nodemailer.createTransport({
-    host: config.email.host,
-    port: config.email.port,
-    secure: config.email.port === 465,
-    auth: { user: config.email.user, pass: config.email.pass },
+    host: email.host,
+    port: email.port,
+    secure: email.port === 465,
+    auth: { user: email.user, pass: email.pass },
     // Nodemailer waits 2 minutes by default, which holds the HTTP request open that long
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
@@ -25,18 +27,19 @@ export const sendEmail = async (
   subject: string,
   html: string
 ): Promise<boolean> => {
-  const transporter = createTransporter();
+  const email = await integrations.email();
+  const transporter = createTransporter(email);
   if (!transporter) {
     console.log(`[Email Dev] To: ${to} | Subject: ${subject}`);
     return true;
   }
   try {
-    await transporter.sendMail({ from: config.email.from, to, subject, html });
+    await transporter.sendMail({ from: email.from, to, subject, html });
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     // EACCES/EPERM on connect: the host's firewall blocks outbound SMTP to that port
     const hint = err.syscall === "connect" && /EACCES|EPERM/.test(err.message)
-      ? ` (outbound SMTP to ${config.email.host}:${config.email.port} is blocked by this host)`
+      ? ` (outbound SMTP to ${email.host}:${email.port} is blocked by this host)`
       : "";
     console.error(`Email to ${to} failed: ${err.message}${hint}`);
     throw error;
