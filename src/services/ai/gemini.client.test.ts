@@ -25,14 +25,19 @@ process.env.GEMINI_API_KEYS = "test-key";
 process.env.GEMINI_MODEL = "gemini-2.5-flash-lite";
 process.env.GEMINI_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 // Nothing saved in Admin -> Settings, so the environment values above apply
-const { prisma } = await import("../../config/database.js");
+const { prisma, disconnectDatabase } = await import("../../config/database.js");
 (prisma.adminSetting as unknown as { findMany: () => Promise<never[]> }).findMany = async () => [];
 const { generateJson } = await import("./gemini.client.js");
 
 const schema = { zod: z.object({ summary: z.string() }), json: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] } };
 
 test("a retired GEMINI_MODEL falls back to the default model and is skipped afterwards", async (t) => {
-  t.after(() => server.close());
+  // Close keep-alive sockets and the DB pool too, or the test process never exits
+  t.after(async () => {
+    server.closeAllConnections();
+    server.close();
+    await disconnectDatabase();
+  });
 
   assert.deepEqual(await generateJson({ system: "s", prompt: "p", task: "test", schema }), { summary: "ok" });
   assert.equal(calls.length, 2);
