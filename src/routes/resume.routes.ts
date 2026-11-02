@@ -70,6 +70,7 @@ router.post("/:id/duplicate", resumeController.duplicateResume);
 router.post("/:id/toggle-public", resumeController.togglePublic);
 router.post("/:id/translate", aiLimiter, validate(translateResumeSchema), resumeAiController.translateResume);
 router.get("/:id/export-pdf", resumeController.exportPDF);
+router.post("/:id/exported", resumeController.recordExport);
 router.patch("/:id/sections", validate(reorderSectionsSchema), resumeController.reorderSections);
 router.post("/:id/experience", validate(experienceItemSchema), resumeController.addExperience);
 

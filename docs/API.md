@@ -80,10 +80,13 @@ Update resume content, title, sections.
 Returns public URL when enabled.
 
 ### GET /resumes/:id/export-pdf
-Returns PDF file.
+Retired (410). The client makes the PDF in the browser from the preview, so it matches it exactly.
+
+### POST /resumes/:id/exported
+Records a PDF download made in the browser (updates `lastExportedAt` and the `pdfExports` stat).
 
 ### GET /resumes/public/:slug
-Public resume (no auth).
+Public resume (no auth): `title`, `content`, `templateId`, `language`, `theme`, `sectionOrder` and `watermark` (the owner's plan), everything the preview is drawn with.
 
 ### POST /resumes/ai/generate
 ```json

@@ -28,7 +28,6 @@ import {
   checkFeatureAccess,
   getUserLimits,
 } from "../services/subscription.service.js";
-import { generateResumePDF } from "../services/pdf.service.js";
 import { trackEvent } from "../services/analytics.service.js";
 import { cacheGet, cacheSet } from "../config/redis.js";
 import { extractCvText, resolveCvMimeType } from "../services/pdf-extraction.service.js";
@@ -276,28 +275,22 @@ export const checkATS = asyncHandler(async (req: AuthRequest, res: Response) => 
   res.json({ success: true, data: result });
 });
 
+/**
+ * Retired: the server-drawn PDF never matched the preview. The app now makes the PDF in
+ * the browser from the preview itself (client src/lib/resume/pdf.ts). Old pages that
+ * still call this get a message pointing to the Download PDF button.
+ */
 export const exportPDF = asyncHandler(async (req: AuthRequest, res: Response) => {
+  await findOwnResume(String(req.params.id), req.user!.userId);
+  throw new ApiError(410, "This download has been replaced. Reload the editor and use Download PDF.");
+});
+
+/** The editor reports each PDF download (made in the browser) for the export stats. */
+export const recordExport = asyncHandler(async (req: AuthRequest, res: Response) => {
   const resume = await findOwnResume(String(req.params.id), req.user!.userId);
-
-  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
-  const limits = user ? await getUserLimits(user) : { watermarkPdf: true };
-
-  const pdfBuffer = await generateResumePDF(resume.content as unknown as IResumeContent, {
-    watermark: limits.watermarkPdf,
-    format: resume.format,
-    templateId: resume.templateId,
-    theme: resume.theme as Record<string, string>,
-  });
-
   await prisma.resume.update({ where: { id: resume.id }, data: { lastExportedAt: new Date() } });
   await trackEvent("pdfExports");
-
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${resume.slug}.pdf"`
-  );
-  res.send(pdfBuffer);
+  res.json({ success: true });
 });
 
 export const togglePublic = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -327,8 +320,15 @@ export const getPublicResume = asyncHandler(async (req: AuthRequest, res: Respon
   const found = await prisma.resume.findFirst({ where: { publicSlug: String(req.params.slug), isPublic: true }, select: { id: true } });
   if (!found) throw new ApiError(404, "Resume not found");
 
-  const resume = await prisma.resume.update({ where: { id: found.id }, data: { viewCount: { increment: 1 } } });
+  const resume = await prisma.resume.update({
+    where: { id: found.id },
+    data: { viewCount: { increment: 1 } },
+    include: { user: true },
+  });
+  // The owner's plan decides the footer line, as on the owner's own preview and PDF
+  const limits = await getUserLimits(resume.user);
 
+  // Everything the editor preview draws with, so the shared page and its PDF match it
   res.json({
     success: true,
     data: {
@@ -337,6 +337,9 @@ export const getPublicResume = asyncHandler(async (req: AuthRequest, res: Respon
       templateId: resume.templateId,
       format: resume.format,
       language: resume.language,
+      theme: resume.theme,
+      sectionOrder: resume.sectionOrder,
+      watermark: limits.watermarkPdf,
     },
   });
 });
