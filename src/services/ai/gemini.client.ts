@@ -66,18 +66,28 @@ const thinkingConfigFor = (model: string): GenerateContentConfig["thinkingConfig
 };
 
 /**
- * Models that answered "not found / no longer available" in this process. Google retires
+ * Models that answered "not found / no longer available", with when they did. Google retires
  * model ids (gemini-2.5-flash-lite stopped working in Oct 2026), so a stale GEMINI_MODEL
- * would otherwise cost a failed call on every request.
+ * would otherwise cost a failed call on every request. The skip expires so the model chosen
+ * in Admin -> Settings is tried again (e.g. after the key gains access) without a restart.
  */
-const unavailableModels = new Set<string>();
+const unavailableModels = new Map<string, number>();
+const UNAVAILABLE_MODEL_SKIP_MS = 30 * 60_000;
+
+const isUnavailable = (model: string) => {
+  const since = unavailableModels.get(model);
+  if (since === undefined) return false;
+  if (Date.now() - since < UNAVAILABLE_MODEL_SKIP_MS) return true;
+  unavailableModels.delete(model);
+  return false;
+};
 
 /** GEMINI_MODEL, then GEMINI_FALLBACK_MODEL, then the built-in default, skipping retired ones. */
 const modelChain = (settings: { model: string; fallbackModel: string }) => {
   const all = [settings.model, settings.fallbackModel, DEFAULT_GEMINI_MODEL].filter(
     (m, i, list): m is string => Boolean(m) && list.indexOf(m) === i
   );
-  const usable = all.filter((m) => !unavailableModels.has(m));
+  const usable = all.filter((m) => !isUnavailable(m));
   return usable.length > 0 ? usable : all;
 };
 
@@ -184,7 +194,7 @@ export async function generateJson<T>(options: GenerateJsonOptions<T>): Promise<
           triedKeys.add(picked.index);
           break;
         case "model_unavailable":
-          unavailableModels.add(model);
+          unavailableModels.set(model, Date.now());
           if (modelIndex < models.length - 1) {
             modelIndex += 1;
             console.warn(`[ai] model ${model} unavailable, falling back to ${models[modelIndex]}`);
