@@ -34,6 +34,10 @@ API for a bilingual (Bangla/English) CV builder for the Bangladesh job market: C
 - **Admin panel** — Users, revenue, coupons, templates, blogs, settings with a "send test email" check
 - **User activity log** — Admin → User activity: sign-ups, logins, CVs, AI use, purchase requests and payments per user, with filters
 - **Admin email notifications** — new users, purchase requests and new CVs, each switchable in Admin → Settings
+- **Premium passes** — 7-day, 30-day and 1-year passes that stack and end on their date (reminder 3 days before, then back to Free)
+- **Extras and orders** — PDF credits, AI packs, employer CV screening credits, and services an admin delivers (Admin → Products / Orders)
+- **Growth** — access codes for universities and coaching centres, invite rewards (3 friends who make a CV = 7 Premium days), job circulars API
+- **Employer CV screening** — AI scores uploaded CVs against a job using job-relevant evidence only; only scores kept, deleted after 30 days
 - **Blog & SEO** — Sitemap, OpenGraph, schema markup
 
 ## Tech Stack

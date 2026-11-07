@@ -10,6 +10,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { generateAccessCode, normalizeCode } from "../services/rewards.service.js";
 import { updateOrderByAdmin } from "../services/order.service.js";
+import { serializeResume } from "../models/Resume.js";
 
 // Admin endpoints for products, orders, access codes and job circulars, and the public job
 // circular endpoints. Bodies are checked with zod here; unknown keys are dropped.
@@ -117,6 +118,15 @@ export const listOrders = asyncHandler(async (req: AuthRequest, res: Response) =
       waiting,
     },
   });
+});
+
+/** The CV a customer attached to a service order, so the admin can review it. Only via the order. */
+export const getOrderResume = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const order = await prisma.order.findUnique({ where: { id: String(req.params.id) }, select: { resumeId: true, userId: true } });
+  if (!order?.resumeId || !order.userId) throw new ApiError(404, "This order has no CV attached");
+  const resume = await prisma.resume.findFirst({ where: { id: order.resumeId, userId: order.userId } });
+  if (!resume) throw new ApiError(404, "The customer has deleted this CV");
+  res.json({ success: true, data: serializeResume(resume) });
 });
 
 export const updateOrder = asyncHandler(async (req: AuthRequest, res: Response) => {

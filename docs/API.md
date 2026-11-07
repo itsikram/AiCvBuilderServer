@@ -279,6 +279,29 @@ if the email must be verified first, 404 if no trial is offered.
 
 ---
 
+## Passes, extras and growth
+
+- `GET /payments/plans` includes `priceWeekly` (7-day pass; 0 hides it).
+- Checkout (`POST /payments/bkash`, `/payments/sslcommerz`, `/payments/nagad`) takes either a pass
+  (`planSlug`, `billingCycle`: `weekly` | `monthly` | `yearly`, optional `couponCode`) or a product
+  (`productSlug`, plus `orderNotes` and/or `resumeId` for services). Passes add 7/30/365 days after the current
+  end date. Paid Premium ends on its date; an hourly job moves it to Free and emails the user, and sends one
+  reminder 3 days before.
+- `GET /payments/products` (public): active products. `GET /payments/orders` (auth): the user's orders.
+- `POST /payments/redeem` `{ code }`: redeem an organisation's access code for Premium days.
+- `POST /payments/watermark-free` `{ resumeId }`: Premium passes; otherwise uses one PDF credit (402 when none).
+- AI packs add `bonusRequests`, used after the plan's limits; `GET /resumes/ai/quota` reports them and `pdfCredits`.
+- `GET /auth/me` includes `credits` and `referral` (`signups`, `qualified`, `rewardEvery`, `rewardDays`, `toNextReward`).
+- `GET /jobs?category=&open=1&page=&limit=`, `GET /jobs/:slug`: published job circulars.
+- Employer screening (auth): `GET/POST /screenings`, `GET/DELETE /screenings/:id`,
+  `POST /screenings/:id/candidates` (multipart `file`, PDF or DOCX; one credit each, refunded on failure; 402 when none).
+
+Admin: `GET/POST /admin/products`, `PATCH /admin/products/:id`; `GET /admin/orders?status=&kind=service`,
+`PATCH /admin/orders/:id` `{ status, deliveryMessage }`, `GET /admin/orders/:id/resume`;
+`GET/POST /admin/access-codes`, `PATCH /admin/access-codes/:id`; `GET/POST /admin/jobs`, `PATCH/DELETE /admin/jobs/:id`.
+
+---
+
 ## Admin (requires admin role)
 
 Public: `GET /page-content` returns active Page Content entries only; the admin list

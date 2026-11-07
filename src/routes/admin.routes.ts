@@ -43,6 +43,7 @@ router.post("/products", growthController.createProduct);
 router.patch("/products/:id", byId, growthController.updateProduct);
 router.get("/orders", growthController.listOrders);
 router.patch("/orders/:id", byId, growthController.updateOrder);
+router.get("/orders/:id/resume", byId, growthController.getOrderResume);
 router.get("/access-codes", growthController.listAccessCodes);
 router.post("/access-codes", growthController.createAccessCode);
 router.patch("/access-codes/:id", byId, growthController.updateAccessCode);
