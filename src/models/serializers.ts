@@ -5,6 +5,9 @@ import type {
   Blog,
   Coupon,
   CoverLetter,
+  JobCircular,
+  Order,
+  Product,
   PageContent,
   Payment,
   PaymentConfig,
@@ -134,4 +137,26 @@ export const serializeAdminSetting = (setting: AdminSetting) => {
 export const serializeAnalytics = (row: Analytics) => {
   const { id, date, createdAt, updatedAt, ...metrics } = row;
   return { _id: id, date, metrics, createdAt, updatedAt };
+};
+
+export const serializeProduct = (product: Product) => withId(product);
+
+export const serializeOrder = (order: Order & { product?: Product; user?: UserRef | null }) => {
+  const { product, user, ...rest } = order;
+  return {
+    _id: order.id,
+    ...rest,
+    ...(product && { product: serializeProduct(product) }),
+    ...(user !== undefined && { user: user ? userRef(user) : null }),
+  };
+};
+
+export const serializeJobCircular = (job: JobCircular) => {
+  const { authorId: _author, ...rest } = job;
+  return {
+    _id: job.id,
+    ...rest,
+    /** Still accepting applications (no deadline, or the deadline day hasn't ended in Bangladesh) */
+    isOpen: !job.deadline || job.deadline.getTime() + 24 * 60 * 60 * 1000 > Date.now(),
+  };
 };

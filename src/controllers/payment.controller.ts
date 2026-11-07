@@ -4,17 +4,22 @@ import { AuthRequest } from "../middleware/auth.middleware.js";
 import {
   initiateSSLCommerzPayment,
   handleSSLCommerzIPN,
-  initiateBkashPayment,
   initiateNagadPayment,
   calculatePrice,
+  createPendingPayment,
+  isPassCycle,
+  resolvePurchase,
+  type PurchaseInput,
 } from "../services/payment.service.js";
 import { prisma } from "../config/database.js";
 import { asJson } from "../models/Resume.js";
-import { serializePayment, serializePaymentConfig, serializePlan } from "../models/serializers.js";
+import { serializeOrder, serializePayment, serializePaymentConfig, serializePlan, serializeProduct } from "../models/serializers.js";
 import { ApiError } from "../utils/ApiError.js";
 import { apiOriginOf } from "../utils/requestOrigin.js";
 import { announcePurchaseRequest } from "../services/notification.service.js";
-import { getTrialInfo, startTrial } from "../services/subscription.service.js";
+import { getTrialInfo, isPremium, startTrial } from "../services/subscription.service.js";
+import { useWatermarkFreeDownload } from "../services/order.service.js";
+import { redeemAccessCode } from "../services/rewards.service.js";
 import { recordActivity } from "../services/activity.service.js";
 import { subscriptionOf } from "../models/User.js";
 
@@ -31,24 +36,24 @@ export const getPlans = asyncHandler(async (_req: AuthRequest, res: Response) =>
 });
 
 export const calculatePlanPrice = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { planSlug, billingCycle, couponCode } = req.query as {
-    planSlug: string;
-    billingCycle: "monthly" | "yearly";
-    couponCode?: string;
-  };
+  const { planSlug, billingCycle, couponCode } = req.query as { planSlug: string; billingCycle: string; couponCode?: string };
+  if (!isPassCycle(billingCycle)) throw new ApiError(400, "billingCycle must be weekly, monthly or yearly");
   const result = await calculatePrice(planSlug, billingCycle, couponCode);
   res.json({ success: true, data: result });
 });
 
+/** What a checkout body may say: a Premium pass (planSlug + billingCycle) or a product (productSlug). */
+const purchaseInput = (body: Record<string, unknown>): PurchaseInput => ({
+  planSlug: typeof body.planSlug === "string" ? body.planSlug : undefined,
+  billingCycle: body.billingCycle,
+  couponCode: typeof body.couponCode === "string" && body.couponCode.trim() ? body.couponCode.trim() : undefined,
+  productSlug: typeof body.productSlug === "string" && body.productSlug ? body.productSlug : undefined,
+  orderNotes: typeof body.orderNotes === "string" ? body.orderNotes : undefined,
+  resumeId: typeof body.resumeId === "string" && body.resumeId ? body.resumeId : undefined,
+});
+
 export const payWithSSLCommerz = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { planSlug, billingCycle, couponCode } = req.body;
-  const result = await initiateSSLCommerzPayment(
-    req.user!.userId,
-    planSlug,
-    billingCycle,
-    couponCode,
-    apiOriginOf(req)
-  );
+  const result = await initiateSSLCommerzPayment(req.user!.userId, purchaseInput(req.body ?? {}), apiOriginOf(req));
   announcePurchaseRequest(req, result.transactionId);
   res.json({ success: true, data: result });
 });
@@ -63,13 +68,7 @@ export const getBkashConfig = asyncHandler(async (_req: AuthRequest, res: Respon
 });
 
 export const payWithBkash = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { planSlug, billingCycle, couponCode, bkashNumber, transactionId } = req.body as {
-    planSlug: string;
-    billingCycle: "monthly" | "yearly";
-    couponCode?: string;
-    bkashNumber: string;
-    transactionId: string;
-  };
+  const { bkashNumber, transactionId } = (req.body ?? {}) as { bkashNumber?: string; transactionId?: string };
 
   if (!bkashNumber || !transactionId) {
     throw new ApiError(400, "Please provide the BKash number and transaction ID");
@@ -87,25 +86,15 @@ export const payWithBkash = asyncHandler(async (req: AuthRequest, res: Response)
     throw new ApiError(400, "Please send the payment to the BKash number shown on the Billing page");
   }
 
-  const { amount } = await calculatePrice(planSlug, billingCycle, couponCode);
+  const trxId = String(transactionId).trim();
+  if (await prisma.payment.findUnique({ where: { transactionId: trxId }, select: { id: true } })) {
+    throw new ApiError(409, "This transaction ID has already been submitted.");
+  }
 
-  const payment = await prisma.payment.create({
-    data: {
-      userId: req.user!.userId,
-      planSlug,
-      billingCycle,
-      amount,
-      currency: "BDT",
-      provider: "bkash",
-      status: "pending",
-      transactionId: String(transactionId).trim(),
-      providerData: asJson({
-        submittedBkashNumber: normalizedSubmitted,
-        submittedAt: new Date().toISOString(),
-      }),
-      couponCode,
-      discountAmount: 0,
-    },
+  const purchase = await resolvePurchase(req.user!.userId, purchaseInput(req.body ?? {}));
+  const payment = await createPendingPayment(req.user!.userId, purchase, "bkash", trxId, {
+    submittedBkashNumber: normalizedSubmitted,
+    submittedAt: new Date().toISOString(),
   });
 
   announcePurchaseRequest(req, payment.transactionId);
@@ -123,8 +112,7 @@ export const payWithBkash = asyncHandler(async (req: AuthRequest, res: Response)
 });
 
 export const payWithNagad = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { planSlug, billingCycle } = req.body;
-  const result = await initiateNagadPayment(req.user!.userId, planSlug, billingCycle);
+  const result = await initiateNagadPayment(req.user!.userId, purchaseInput(req.body ?? {}));
   announcePurchaseRequest(req, result.transactionId);
   res.json({ success: true, data: result });
 });
@@ -165,4 +153,39 @@ export const getPaymentHistory = asyncHandler(async (req: AuthRequest, res: Resp
     take: 20,
   });
   res.json({ success: true, data: payments.map(serializePayment) });
+});
+
+/** One-time products on sale (credit packs, and services an admin has switched on). */
+export const getProducts = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const products = await prisma.product.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } });
+  res.json({ success: true, data: products.map(serializeProduct) });
+});
+
+/** The signed-in user's product orders, newest first. */
+export const getMyOrders = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const orders = await prisma.order.findMany({
+    where: { userId: req.user!.userId },
+    include: { product: true },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+  res.json({ success: true, data: orders.map(serializeOrder) });
+});
+
+/** Redeems an organisation's access code for Premium days. */
+export const redeemCode = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const user = await currentUser(req);
+  const result = await redeemAccessCode(user, req.body?.code, req);
+  res.json({
+    success: true,
+    message: `Code accepted: ${result.days} days of Premium added (${result.label}).`,
+    data: { ...result, subscription: subscriptionOf(user) },
+  });
+});
+
+/** Before a watermark-free download: Premium passes, otherwise one PDF credit is used. */
+export const useWatermarkFree = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const user = await currentUser(req);
+  const result = await useWatermarkFreeDownload(user, String(req.body?.resumeId ?? ""), isPremium(user), req);
+  res.json({ success: true, data: result });
 });

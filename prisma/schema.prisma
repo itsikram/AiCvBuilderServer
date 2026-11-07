@@ -74,8 +74,34 @@ enum PaymentStatus {
 }
 
 enum BillingCycle {
+  weekly
   monthly
   yearly
+}
+
+/// What a one-time product gives: credits used up one at a time, or a service done by a person
+enum ProductKind {
+  pdf_credits
+  ai_credits
+  screening_credits
+  service
+}
+
+enum OrderStatus {
+  awaiting_payment
+  paid
+  in_progress
+  delivered
+  cancelled
+}
+
+enum JobCategory {
+  government
+  bank
+  private
+  ngo
+  international
+  other
 }
 
 enum DiscountType {
@@ -111,6 +137,19 @@ model User {
   /// When the user started their one free Premium trial (null: never). While on it, the plan is
   /// premium with status "trial" until subscriptionExpiresAt.
   trialStartedAt           DateTime?
+  /// When the "Premium ends soon" email went out for the current paid period (reset on renewal)
+  expiryReminderSentAt     DateTime?
+  /// Watermark-free PDF downloads bought one at a time
+  pdfCredits               Int                @default(0)
+  /// Extra AI requests from a pack, used once the plan's limits are reached; void after bonusAiExpiresAt
+  bonusAiRequests          Int                @default(0)
+  bonusAiExpiresAt         DateTime?
+  /// CVs this user (an employer) can still screen against a job
+  screeningCredits         Int                @default(0)
+  /// Referred friends who went on to create a CV; every N of them earns Premium days
+  qualifiedReferrals       Int                @default(0)
+  /// When this user (if referred) created their first CV and so counted for their referrer
+  referralQualifiedAt      DateTime?
   resumesCreated           Int                @default(0)
   aiRequestsThisMonth      Int                @default(0)
   lastAiReset              DateTime           @default(now())
@@ -134,6 +173,11 @@ model User {
   adminSettings  AdminSetting[]
   paymentConfigs PaymentConfig[]
   activities     ActivityLog[]
+  orders         Order[]
+  redemptions    AccessCodeRedemption[]
+  accessCodes    AccessCode[]
+  screenings     Screening[]
+  jobCirculars   JobCircular[]
 
   @@index([googleId])
   @@index([emailVerificationToken])
@@ -200,8 +244,12 @@ model Payment {
   id                String          @id @default(cuid()) @db.VarChar(36)
   /// Null once the user is deleted; the payment record is kept
   userId            String?         @db.VarChar(36)
+  /// The plan's slug, or for a product purchase the product's slug
   planSlug          String          @db.VarChar(80)
-  billingCycle      BillingCycle
+  /// Null for product purchases
+  billingCycle      BillingCycle?
+  /// Set when the payment is for a one-time product (see Order) rather than Premium
+  productSlug       String?         @db.VarChar(80)
   amount            Float
   currency          String          @default("BDT") @db.VarChar(8)
   provider          PaymentProvider
@@ -214,7 +262,8 @@ model Payment {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  orders Order[]
 
   @@index([userId, createdAt])
   @@index([provider, status, createdAt])
@@ -226,6 +275,8 @@ model SubscriptionPlan {
   name             String   @db.VarChar(100)
   slug             String   @unique @db.VarChar(80)
   description      String   @db.Text
+  /// Price of a 7-day pass; 0 hides the 7-day option
+  priceWeekly      Float    @default(0)
   priceMonthly     Float
   priceYearly      Float
   currency         String   @default("BDT") @db.VarChar(8)
@@ -390,6 +441,167 @@ model ActivityLog {
   @@index([userId, createdAt])
   @@index([type, createdAt])
   @@map("activity_logs")
+}
+
+/// Something sold once: credit packs (PDF, AI, CV screening) or a service done by a person.
+/// Managed in Admin -> Products; switch one off with isActive rather than deleting it.
+model Product {
+  id           String      @id @default(cuid()) @db.VarChar(36)
+  slug         String      @unique @db.VarChar(80)
+  name         String      @db.VarChar(150)
+  description  String      @db.Text
+  kind         ProductKind
+  price        Float
+  currency     String      @default("BDT") @db.VarChar(8)
+  /// Credits granted per purchase (1 for services)
+  quantity     Int         @default(1)
+  /// Days the credits last (AI packs); 0 means they don't expire
+  validDays    Int         @default(0)
+  /// Promised delivery time for services, in days
+  deliveryDays Int         @default(0)
+  isActive     Boolean     @default(true)
+  sortOrder    Int         @default(0)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  orders Order[]
+
+  @@index([isActive, sortOrder])
+  @@map("products")
+}
+
+/// A product purchase. Credit products are delivered automatically when paid; services are
+/// fulfilled by an admin in Admin -> Orders.
+model Order {
+  id              String      @id @default(cuid()) @db.VarChar(36)
+  userId          String?     @db.VarChar(36)
+  productId       String      @db.VarChar(36)
+  paymentId       String?     @db.VarChar(36)
+  status          OrderStatus @default(awaiting_payment)
+  amount          Float
+  currency        String      @default("BDT") @db.VarChar(8)
+  /// What the customer asked for (services)
+  notes           String?     @db.Text
+  /// The CV the service is about
+  resumeId        String?     @db.VarChar(36)
+  /// The admin's reply or delivered work (services)
+  deliveryMessage String?     @db.Text
+  deliveredAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  product Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@map("orders")
+}
+
+/// A code an organisation (university, coaching centre) hands out: each redemption gives that
+/// account premiumDays of Premium. Managed in Admin -> Access codes.
+model AccessCode {
+  id          String    @id @default(cuid()) @db.VarChar(36)
+  code        String    @unique @db.VarChar(40)
+  /// Who it is for, e.g. "DU Career Club, batch 2026"
+  label       String    @db.VarChar(150)
+  premiumDays Int
+  maxUses     Int       @default(100)
+  usedCount   Int       @default(0)
+  expiresAt   DateTime?
+  isActive    Boolean   @default(true)
+  createdById String?   @db.VarChar(36)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  createdBy   User?                  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  redemptions AccessCodeRedemption[]
+
+  @@map("access_codes")
+}
+
+model AccessCodeRedemption {
+  id        String   @id @default(cuid()) @db.VarChar(36)
+  codeId    String   @db.VarChar(36)
+  userId    String   @db.VarChar(36)
+  createdAt DateTime @default(now())
+
+  code AccessCode @relation(fields: [codeId], references: [id], onDelete: Cascade)
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([codeId, userId])
+  @@index([userId])
+  @@map("access_code_redemptions")
+}
+
+/// A job circular summarised for job seekers (Admin -> Job circulars), with a link to the
+/// official source and apply page. Public at /jobs/:slug (or /bn/jobs/:slug for Bangla).
+model JobCircular {
+  id           String      @id @default(cuid()) @db.VarChar(36)
+  slug         String      @unique @db.VarChar(255)
+  title        String      @db.VarChar(255)
+  organization String      @db.VarChar(255)
+  category     JobCategory @default(government)
+  language     Language    @default(bn)
+  /// The circular's details in plain text (paragraphs separated by blank lines)
+  summary      String      @db.Text
+  vacancies    Int?
+  location     String?     @db.VarChar(255)
+  salary       String?     @db.VarChar(255)
+  education    String?     @db.VarChar(500)
+  applyStart   DateTime?
+  deadline     DateTime?
+  applyUrl     String?     @db.Text
+  sourceUrl    String?     @db.Text
+  /// Photo and signature rules, e.g. "Photo 300×300 px (max 100 KB), signature 300×80 px (max 60 KB)"
+  photoSpec    String?     @db.VarChar(255)
+  isPublished  Boolean     @default(false)
+  publishedAt  DateTime?
+  authorId     String?     @db.VarChar(36)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([isPublished, publishedAt])
+  @@index([isPublished, deadline])
+  @@map("job_circulars")
+}
+
+/// An employer's CV screening for one job: candidates are scored by AI against the job
+/// description. Only scores and short notes are kept, not the CVs; deleted after 30 days.
+model Screening {
+  id             String   @id @default(cuid()) @db.VarChar(36)
+  userId         String   @db.VarChar(36)
+  title          String   @db.VarChar(255)
+  jobDescription String   @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  candidates ScreeningCandidate[]
+
+  @@index([userId, createdAt])
+  @@map("screenings")
+}
+
+model ScreeningCandidate {
+  id          String   @id @default(cuid()) @db.VarChar(36)
+  screeningId String   @db.VarChar(36)
+  fileName    String   @db.VarChar(255)
+  name        String?  @db.VarChar(255)
+  /// Match with the job, 0-100
+  score       Int
+  strengths   Json
+  gaps        Json
+  summary     String   @db.Text
+  createdAt   DateTime @default(now())
+
+  screening Screening @relation(fields: [screeningId], references: [id], onDelete: Cascade)
+
+  @@index([screeningId, score])
+  @@map("screening_candidates")
 }
 
 /// One row per day of site-wide counters

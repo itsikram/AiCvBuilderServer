@@ -101,6 +101,14 @@ const skillsSchema = S.object({
   reasoning: S.string(undefined, 600),
 });
 
+const candidateSchema = S.object({
+  name: S.string("The candidate's full name as written on the CV, or empty", 120),
+  score: S.number("0-100: how well the candidate meets the job's requirements, from the CV's evidence", 0, 100),
+  strengths: S.array(S.string("A requirement the candidate clearly meets, with the evidence from the CV", 180), 5),
+  gaps: S.array(S.string("An important requirement the CV doesn't show", 180), 5),
+  summary: S.string("2 sentences for the recruiter: overall fit and the main reason", 450),
+});
+
 const str = (max = 300) => S.string(undefined, max);
 const parsedCvSchema = S.object({
   personalInfo: S.object({
@@ -261,6 +269,26 @@ class GeminiService {
           `Education: ${input.education || "-"}`,
           `Projects: ${input.projects || "-"}`,
         ].join("\n")),
+      ].join("\n"),
+    });
+  }
+
+  /** For employers: scores one candidate's CV against a job, using job-relevant evidence only. */
+  scoreCandidate(cvText: string, jobDescription: string) {
+    return generateJson({
+      task: "score-candidate",
+      system: baseSystem("en"),
+      schema: candidateSchema,
+      temperature: 0.2,
+      maxOutputTokens: 1500,
+      prompt: [
+        "You help a recruiter in Bangladesh shortlist candidates. Score how well this CV meets the job's requirements",
+        "(skills, experience, education, certifications, tools, languages), using only evidence written in the CV.",
+        "Ignore name, gender, age or date of birth, religion, marital status, photo, family details, home district",
+        "and anything else unrelated to doing the job; never let them change the score. Missing information counts as",
+        "not shown, not as a weakness of the person. Write strengths, gaps and summary in English.",
+        asData("cv", cvText.slice(0, 12000)),
+        asData("job", jobDescription.slice(0, 8000)),
       ].join("\n"),
     });
   }

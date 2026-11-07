@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import * as adminController from "../controllers/admin.controller.js";
+import * as growthController from "../controllers/growth.controller.js";
 import { authenticate, requireAdmin } from "../middleware/auth.middleware.js";
 import { validate } from "../middleware/validate.middleware.js";
 import {
@@ -35,6 +36,20 @@ router.use(authenticate, requireAdmin);
 
 router.get("/dashboard", adminController.getDashboard);
 router.get("/activity", adminController.getActivity);
+
+// Products, orders, access codes and job circulars
+router.get("/products", growthController.listProducts);
+router.post("/products", growthController.createProduct);
+router.patch("/products/:id", byId, growthController.updateProduct);
+router.get("/orders", growthController.listOrders);
+router.patch("/orders/:id", byId, growthController.updateOrder);
+router.get("/access-codes", growthController.listAccessCodes);
+router.post("/access-codes", growthController.createAccessCode);
+router.patch("/access-codes/:id", byId, growthController.updateAccessCode);
+router.get("/jobs", growthController.adminListJobs);
+router.post("/jobs", growthController.createJob);
+router.patch("/jobs/:id", byId, growthController.updateJob);
+router.delete("/jobs/:id", byId, growthController.deleteJob);
 router.get("/users", adminController.getUsers);
 router.patch("/users/:id", byId, validate(adminUpdateUserSchema), adminController.updateUser);
 router.patch("/users/:id/subscription", byId, adminController.updateUserSubscription);

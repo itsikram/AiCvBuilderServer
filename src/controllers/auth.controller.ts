@@ -12,6 +12,8 @@ import { sendVerificationEmail, sendPasswordResetEmail } from "../services/email
 import { trackEvent } from "../services/analytics.service.js";
 import { recordActivity } from "../services/activity.service.js";
 import { announceNewUser } from "../services/notification.service.js";
+import { referralRewardRule } from "../services/rewards.service.js";
+import { bonusAiAvailable } from "../services/subscription.service.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
 import { normalizeLanguage } from "../utils/language.js";
 import { qualifiesForAutoAdmin } from "../utils/autoAdmin.js";
@@ -228,9 +230,30 @@ export const getMe = asyncHandler(async (req: AuthRequest, res: Response) => {
       usage: usageOf(user),
       referralCode: user.referralCode,
       referralCount: user.referralCount,
+      referral: await referralSummary(user),
+      credits: {
+        pdf: user.pdfCredits,
+        ai: bonusAiAvailable(user),
+        aiExpiresAt: bonusAiAvailable(user) ? user.bonusAiExpiresAt ?? undefined : undefined,
+        screening: user.screeningCredits,
+      },
     },
   });
 });
+
+/** Invite progress for the dashboard: friends who signed up, who made a CV, and the reward rule. */
+const referralSummary = async (user: User) => {
+  const { every, days } = await referralRewardRule();
+  return {
+    code: user.referralCode,
+    signups: user.referralCount,
+    qualified: user.qualifiedReferrals,
+    rewardEvery: every,
+    rewardDays: days,
+    /** Friends still needed for the next reward (0 when rewards are off) */
+    toNextReward: every ? every - (user.qualifiedReferrals % every) : 0,
+  };
+};
 
 export const verifyEmail = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { token } = req.body;

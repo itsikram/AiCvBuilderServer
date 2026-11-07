@@ -8,6 +8,8 @@ import blogRoutes from "./blog.routes.js";
 import adminRoutes from "./admin.routes.js";
 import pageContentRoutes from "./pageContent.routes.js";
 import contactRoutes from "./contact.routes.js";
+import jobsRoutes from "./jobs.routes.js";
+import screeningRoutes from "./screening.routes.js";
 import { getDatabaseStatus } from "../config/database.js";
 import { integrations } from "../services/settings.service.js";
 
@@ -22,6 +24,8 @@ router.use("/blogs", blogRoutes);
 router.use("/page-content", pageContentRoutes);
 router.use("/admin", adminRoutes);
 router.use("/contact", contactRoutes);
+router.use("/jobs", jobsRoutes);
+router.use("/screenings", screeningRoutes);
 
 // Public, non-secret settings the frontend needs at runtime (set in Admin -> Settings)
 router.get("/config", async (_req, res, next) => {

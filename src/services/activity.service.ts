@@ -25,6 +25,14 @@ export const ACTIVITY_TYPES = {
   "plan.changed": "Plan changed by admin",
   "trial.started": "Started a free trial",
   "trial.ended": "Free trial ended",
+  "plan.ended": "Premium ended",
+  "referral.qualified": "A referred friend made a CV",
+  "referral.rewarded": "Earned referral reward",
+  "code.redeemed": "Redeemed an access code",
+  "order.paid": "Order paid",
+  "order.delivered": "Order delivered",
+  "pdf_credit.used": "Used a PDF credit",
+  "screening.scored": "Screened a CV (employer)",
 } as const;
 
 export type ActivityType = keyof typeof ACTIVITY_TYPES;
@@ -65,7 +73,7 @@ export const recordActivity = (input: ActivityInput): void => {
  * `outcome` finishes the sentence, e.g. "confirmed by SSLCommerz" or "rejected by an admin".
  */
 export const recordPaymentOutcome = (
-  payment: { id: string; userId: string | null; amount: number; currency: string; planSlug: string; billingCycle: string; provider: string; transactionId: string },
+  payment: { id: string; userId: string | null; amount: number; currency: string; planSlug: string; billingCycle: string | null; provider: string; transactionId: string },
   completed: boolean,
   outcome: string,
   extra: Record<string, unknown> = {}
@@ -73,7 +81,7 @@ export const recordPaymentOutcome = (
   recordActivity({
     userId: payment.userId,
     type: completed ? "payment.completed" : "payment.failed",
-    message: `Payment of ${payment.currency} ${payment.amount.toLocaleString("en-US")} for ${payment.planSlug} (${payment.billingCycle}) ${outcome}`,
+    message: `Payment of ${payment.currency} ${payment.amount.toLocaleString("en-US")} for ${payment.planSlug}${payment.billingCycle ? ` (${payment.billingCycle})` : ""} ${outcome}`,
     metadata: {
       paymentId: payment.id,
       transactionId: payment.transactionId,
@@ -131,7 +139,12 @@ export const scheduleActivityPruning = (): void => {
   const run = () =>
     pruneActivity()
       .then((count) => count && console.log(`Deleted ${count} activity entries past the retention period`))
-      .catch((error: Error) => console.warn(`Activity pruning failed: ${error.message}`));
+      .catch((error: Error) => console.warn(`Activity pruning failed: ${error.message}`))
+      // Employer CV screenings are kept 30 days
+      .then(() => import("../controllers/screening.controller.js"))
+      .then(({ pruneScreenings }) => pruneScreenings())
+      .then((count) => count && console.log(`Deleted ${count} CV screening(s) older than 30 days`))
+      .catch((error: Error) => console.warn(`Screening pruning failed: ${error.message}`));
   void run();
   setInterval(run, DAY_MS).unref();
 };

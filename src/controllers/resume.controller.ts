@@ -31,6 +31,7 @@ import {
 import { trackEvent } from "../services/analytics.service.js";
 import { recordActivity } from "../services/activity.service.js";
 import { announceCvCreated } from "../services/notification.service.js";
+import { qualifyReferral } from "../services/rewards.service.js";
 import { cacheGet, cacheSet } from "../config/redis.js";
 import { extractCvText, resolveCvMimeType } from "../services/pdf-extraction.service.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
@@ -169,6 +170,7 @@ export const createResume = asyncHandler(async (req: AuthRequest, res: Response)
   await countCreatedResume(user.id);
   await trackEvent("resumesCreated");
   announceCvCreated(req, user, resume, "new");
+  qualifyReferral(user.id);
 
   res.status(201).json({ success: true, data: serializeResume(resume) });
 });
@@ -391,6 +393,7 @@ export const duplicateResume = asyncHandler(async (req: AuthRequest, res: Respon
     },
   });
   announceCvCreated(req, user, copy, "duplicate");
+  qualifyReferral(user.id);
 
   res.status(201).json({ success: true, data: serializeResume(copy) });
 });
@@ -473,6 +476,7 @@ const importCvText = async (
 const recordImport = (req: AuthRequest, user: User, resume: { id: string; title: string; language: string; templateId: string }, intoExisting: boolean, source: "import" | "upload") => {
   if (!intoExisting) {
     announceCvCreated(req, user, resume, source);
+    qualifyReferral(user.id);
     return;
   }
   const feature = source === "upload" ? "Import a file into a CV" : "Import text into a CV";

@@ -22,6 +22,7 @@ import {
 import { checkAiLimit, checkResumeLimit, getAiQuota, incrementAiUsage } from "../services/subscription.service.js";
 import { trackEvent } from "../services/analytics.service.js";
 import { announceCvCreated } from "../services/notification.service.js";
+import { qualifyReferral } from "../services/rewards.service.js";
 import type {
   aiContentSchema,
   grammarSchema,
@@ -212,6 +213,7 @@ export const translateResume = asyncHandler(async (req: AuthRequest, res: Respon
   await prisma.user.update({ where: { id: user.id }, data: { resumesCreated: { increment: 1 } } });
   await trackEvent("resumesCreated");
   announceCvCreated(req, user, copy, "translate");
+  qualifyReferral(user.id);
 
   res.status(201).json({ success: true, data: serializeResume(copy) });
 });

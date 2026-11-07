@@ -471,6 +471,8 @@ const plans = [
     name: "Premium",
     slug: "premium",
     description: "Unlimited resumes and full AI power",
+    // 7-day pass (the 30-day and 1-year passes are priceMonthly and priceYearly)
+    priceWeekly: 99,
     priceMonthly: 499,
     priceYearly: 4990,
     features: [
@@ -496,6 +498,100 @@ const plans = [
     sortOrder: 2,
   },
 ];
+
+/**
+ * One-time products (Admin -> Products). Credit packs are delivered automatically; services
+ * need a person, so they start switched off: turn one on once someone can deliver it.
+ */
+const products = [
+  {
+    slug: "pdf-credit",
+    name: "1 watermark-free PDF",
+    description: "Download one CV without the watermark line, without buying Premium.",
+    kind: "pdf_credits",
+    price: 39,
+    quantity: 1,
+    sortOrder: 1,
+  },
+  {
+    slug: "ai-pack-viva",
+    name: "Viva & interview practice pack",
+    description: "50 extra AI requests for 30 days: practise BCS, bank and job viva questions with the AI interview coach, and polish your CV.",
+    kind: "ai_credits",
+    price: 149,
+    quantity: 50,
+    validDays: 30,
+    sortOrder: 2,
+  },
+  {
+    slug: "screening-25",
+    name: "CV screening: 25 CVs",
+    description: "For employers: score 25 candidate CVs against your job description with AI.",
+    kind: "screening_credits",
+    price: 499,
+    quantity: 25,
+    sortOrder: 3,
+  },
+  {
+    slug: "screening-100",
+    name: "CV screening: 100 CVs",
+    description: "For employers: score 100 candidate CVs against your job description with AI.",
+    kind: "screening_credits",
+    price: 1499,
+    quantity: 100,
+    sortOrder: 4,
+  },
+  {
+    slug: "cv-review",
+    name: "Expert CV review",
+    description: "An HR professional reviews your CV and sends written feedback on what to fix.",
+    kind: "service",
+    price: 500,
+    deliveryDays: 2,
+    isActive: false,
+    sortOrder: 10,
+  },
+  {
+    slug: "cv-rewrite",
+    name: "Professional CV rewrite",
+    description: "An HR professional rewrites your CV for the job you want, in English or Bangla.",
+    kind: "service",
+    price: 1500,
+    deliveryDays: 3,
+    isActive: false,
+    sortOrder: 11,
+  },
+  {
+    slug: "linkedin-makeover",
+    name: "LinkedIn profile makeover",
+    description: "Headline, About section and experience rewritten so recruiters find you.",
+    kind: "service",
+    price: 800,
+    deliveryDays: 3,
+    isActive: false,
+    sortOrder: 12,
+  },
+  {
+    slug: "abroad-cv-pack",
+    name: "Abroad job CV pack",
+    description: "A CV and cover letter for jobs in the Gulf, Malaysia, Europe (Europass), Japan or Korea.",
+    kind: "service",
+    price: 700,
+    deliveryDays: 3,
+    isActive: false,
+    sortOrder: 13,
+  },
+  {
+    slug: "mock-viva",
+    name: "Live mock viva (30 minutes)",
+    description: "A practice viva board by phone or video call with feedback afterwards.",
+    kind: "service",
+    price: 300,
+    deliveryDays: 3,
+    isActive: false,
+    sortOrder: 14,
+  },
+] as const;
 
 async function seed() {
   await connectDatabase();
@@ -523,6 +619,10 @@ async function seed() {
       create: { ...plan, ...limits },
       update: {},
     });
+  }
+
+  for (const product of products) {
+    await prisma.product.upsert({ where: { slug: product.slug }, create: product, update: {} });
   }
 
   await prisma.coupon.upsert({

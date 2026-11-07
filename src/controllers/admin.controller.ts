@@ -33,7 +33,7 @@ import { geminiKeyManager } from "../services/ai/gemini-key-manager.js";
 import { testGeminiKeys } from "../services/ai/gemini.client.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
 import { normalizeLanguage } from "../utils/language.js";
-import { completePayment } from "../services/payment.service.js";
+import { completePayment, failPayment } from "../services/payment.service.js";
 import { findActiveBkashConfig } from "./payment.controller.js";
 import { ACTIVITY_TYPES, isActivityType, recordActivity, recordPaymentOutcome } from "../services/activity.service.js";
 import { sendTestEmail } from "../services/email.service.js";
@@ -321,6 +321,8 @@ export const reviewBkashPayment = asyncHandler(async (req: AuthRequest, res: Res
 
   if (status === "completed") {
     await completePayment(payment);
+  } else {
+    await failPayment(payment);
   }
   recordPaymentOutcome(
     payment,

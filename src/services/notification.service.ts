@@ -165,8 +165,12 @@ export const announcePurchaseRequest = (req: Request, transactionId: string): vo
       include: { user: { select: { id: true, name: true, email: true } } },
     });
     if (!payment) return;
-    const plan = await prisma.subscriptionPlan.findUnique({ where: { slug: payment.planSlug }, select: { name: true } });
-    const planName = plan?.name ?? payment.planSlug;
+    const product = payment.productSlug
+      ? await prisma.product.findUnique({ where: { slug: payment.productSlug }, select: { name: true } })
+      : null;
+    const plan = payment.productSlug ? null : await prisma.subscriptionPlan.findUnique({ where: { slug: payment.planSlug }, select: { name: true } });
+    const passLength = payment.billingCycle ? { weekly: "7-day", monthly: "30-day", yearly: "1-year" }[payment.billingCycle] : "";
+    const planName = product?.name ?? (plan ? `${plan.name} ${passLength} pass` : payment.planSlug);
     const amount = `${payment.currency} ${payment.amount.toLocaleString("en-US")}`;
     const provider = PROVIDERS[payment.provider] ?? payment.provider;
     const manual = payment.provider === "bkash";
@@ -175,13 +179,14 @@ export const announcePurchaseRequest = (req: Request, transactionId: string): vo
     recordActivity({
       userId: payment.userId,
       type: "payment.requested",
-      message: `Asked to buy ${planName} (${payment.billingCycle}) for ${amount} via ${provider}`,
+      message: `Asked to buy ${planName} for ${amount} via ${provider}`,
       metadata: {
         paymentId: payment.id,
         transactionId: payment.transactionId,
         provider: payment.provider,
         plan: payment.planSlug,
-        billingCycle: payment.billingCycle,
+        billingCycle: payment.billingCycle ?? undefined,
+        product: payment.productSlug ?? undefined,
         amount: payment.amount,
         currency: payment.currency,
         couponCode: payment.couponCode ?? undefined,
@@ -199,7 +204,7 @@ export const announcePurchaseRequest = (req: Request, transactionId: string): vo
       rows: [
         ["User", payment.user?.name],
         ["Email", payment.user?.email],
-        ["Plan", `${planName} (${payment.billingCycle})`],
+        [product ? "Product" : "Plan", planName],
         ["Amount", amount],
         ["Coupon", payment.couponCode],
         ["Payment method", provider],
@@ -216,3 +221,41 @@ export const announcePurchaseRequest = (req: Request, transactionId: string): vo
   };
   void run().catch((error: Error) => console.warn(`Purchase request announcement failed: ${error.message}`));
 };
+
+// ---------------------------------------------------------------------------------------------
+// Emails to customers (Premium ending, rewards, orders). Same rules: never awaited by a request,
+// failures only logged, and nothing is sent until SMTP is set up (sendEmail logs instead).
+// ---------------------------------------------------------------------------------------------
+
+interface CustomerNotice {
+  subject: string;
+  heading: string;
+  paragraphs: string[];
+  /** A button into the site, e.g. /dashboard/billing */
+  link?: { label: string; path: string };
+}
+
+const renderCustomerNotice = (name: string, notice: CustomerNotice, siteName: string) => `
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#111827">
+      <h2 style="margin:0 0 12px">${escapeHtml(notice.heading)}</h2>
+      <p style="margin:0 0 12px">Hi ${escapeHtml(name)},</p>
+      ${notice.paragraphs.map((text) => `<p style="margin:0 0 12px;white-space:pre-line">${escapeHtml(text)}</p>`).join("")}
+      ${
+        notice.link
+          ? `<p style="margin:20px 0 0"><a href="${escapeHtml(`${config.clientUrl}${notice.link.path}`)}" style="display:inline-block;background:#2563eb;color:#ffffff;padding:10px 20px;border-radius:8px;text-decoration:none">${escapeHtml(notice.link.label)}</a></p>`
+          : ""
+      }
+      <p style="margin-top:28px;color:#6b7280;font-size:12px">${escapeHtml(siteName)}</p>
+    </div>`;
+
+/** Emails one customer in the background. */
+export const notifyUser = (user: { name: string; email: string }, notice: CustomerNotice): void => {
+  const send = async () => {
+    const siteName = (await getSetting("SITE_NAME")) || config.app.name;
+    await sendEmail(user.email, oneLine(notice.subject), renderCustomerNotice(user.name, notice, siteName));
+  };
+  void send().catch((error: Error) => console.warn(`Customer email to ${user.email} failed: ${error.message}`));
+};
+
+/** A date as Bangladeshi users read it, e.g. "12 Nov 2026". */
+export const bdDate = (date: Date) => date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", dateStyle: "medium" });

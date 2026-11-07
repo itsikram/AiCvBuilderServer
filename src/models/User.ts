@@ -14,8 +14,8 @@ export const comparePassword = async (user: Pick<User, "password">, candidate: s
 
 /** The subscription fields in the nested shape the API has always returned */
 export const subscriptionOf = (user: User) =>
-  trialEnded(user)
-    ? // The stored row is switched to Free by endExpiredTrials() within the hour; until then, report it already
+  premiumEnded(user)
+    ? // The stored row is switched to Free by endExpiredPremium() within the hour; until then, report it already
       { plan: "free" as const, status: "active" as const, expiresAt: undefined }
     : {
         plan: user.subscriptionPlan,
@@ -23,9 +23,22 @@ export const subscriptionOf = (user: User) =>
         expiresAt: user.subscriptionExpiresAt ?? undefined,
       };
 
-/** A free trial whose end date has passed. Its Premium access stops at that moment. */
+type SubscriptionFields = Pick<User, "subscriptionPlan" | "subscriptionStatus" | "subscriptionExpiresAt">;
+
+/** A free trial whose end date has passed (a trial without an end date counts as ended). */
 export const trialEnded = (user: Pick<User, "subscriptionStatus" | "subscriptionExpiresAt">, now = new Date()) =>
   user.subscriptionStatus === "trial" && (!user.subscriptionExpiresAt || user.subscriptionExpiresAt.getTime() <= now.getTime());
+
+/**
+ * Premium (paid, a pass, a code, a referral reward or a trial) whose end date has passed. Its
+ * access stops at that moment. Paid Premium without an end date, as an admin can grant, never ends.
+ */
+export const premiumEnded = (user: SubscriptionFields, now = new Date()) =>
+  trialEnded(user, now) ||
+  (user.subscriptionPlan === "premium" &&
+    user.subscriptionStatus === "active" &&
+    Boolean(user.subscriptionExpiresAt) &&
+    user.subscriptionExpiresAt!.getTime() <= now.getTime());
 
 export const usageOf = (user: User) => ({
   resumesCreated: user.resumesCreated,

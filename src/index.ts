@@ -12,7 +12,7 @@ import routes from "./routes/index.js";
 import { errorHandler, notFound } from "./middleware/error.middleware.js";
 import { generalLimiter } from "./middleware/rateLimit.middleware.js";
 import { scheduleActivityPruning } from "./services/activity.service.js";
-import { scheduleTrialExpiry } from "./services/subscription.service.js";
+import { scheduleSubscriptionJobs } from "./services/subscription.service.js";
 
 const app = express();
 
@@ -72,8 +72,8 @@ const start = async () => {
   await connectWithRetry();
   // Deletes user activity past its retention period (Admin -> Settings), now and daily
   scheduleActivityPruning();
-  // Moves free trials past their end date back to the Free plan, now and hourly
-  scheduleTrialExpiry();
+  // Ends expired Premium and trials, and emails "ends soon" reminders, now and hourly
+  scheduleSubscriptionJobs();
   initCloudinary();
   const redis = getRedis();
   if (redis) {

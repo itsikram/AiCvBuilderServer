@@ -41,3 +41,13 @@ export const aiLimiter = rateLimit({
   keyGenerator: (req: Request) => (req as AuthRequest).user?.userId ?? req.ip ?? "unknown",
   message: message("You're using AI features very quickly. Please wait a little and try again."),
 });
+
+/** Employer CV screening: a batch can be large, so more requests per hour than the AI tools */
+export const screeningLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 300,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => (req as AuthRequest).user?.userId ?? req.ip ?? "unknown",
+  message: message("You're screening CVs very quickly. Please wait a little and try again."),
+});

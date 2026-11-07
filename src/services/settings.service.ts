@@ -95,7 +95,16 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: "MAX_RESUMES_PREMIUM", group: "limits", label: "Max resumes (Premium)", type: "number", envFallback: false, default: planLimit("premium", "maxResumes") },
   { key: "MAX_AI_REQUESTS_PREMIUM", group: "limits", label: "Max AI requests per month (Premium)", type: "number", envFallback: false, default: planLimit("premium", "maxAiRequests") },
   { key: "AI_DAILY_QUOTA_PREMIUM", group: "limits", label: "AI requests per day (Premium)", type: "number", default: "100" },
-  { key: "REFERRAL_BONUS_AMOUNT", group: "limits", label: "Referral bonus amount", type: "number", envFallback: false, default: "0" },
+  {
+    key: "REFERRAL_REWARD_EVERY",
+    group: "limits",
+    label: "Referral reward: friends needed",
+    type: "number",
+    help: "A friend counts once they create their first CV. 0 turns referral rewards off",
+    envFallback: false,
+    default: "3",
+  },
+  { key: "REFERRAL_REWARD_DAYS", group: "limits", label: "Referral reward: Premium days", type: "number", envFallback: false, default: "7" },
 
   { key: "GEMINI_API_KEYS", group: "ai", label: "Gemini API keys", type: "secret", help: "Comma-separated", aliases: ["GEMINI_API_KEY"], placeholder: "AIza..., AIza..." },
   { key: "GEMINI_MODEL", group: "ai", label: "Model", type: "text", help: "gemini-2.5-* models are retired", default: DEFAULT_GEMINI_MODEL },
