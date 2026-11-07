@@ -27,8 +27,12 @@ Refresh token is sent via HTTP-only cookie to `POST /auth/refresh`.
 ```
 
 ### POST /auth/google
+Signs in with the ID token from Google's "Continue with Google" button, creating the account when
+the Google email is new. `referralCode` and `language` are optional and only used for a new account.
+Returns the same body as login plus `isNewUser`. Needs `GOOGLE_CLIENT_ID` (Admin -> Settings ->
+Google Sign-In); without it the endpoint answers 503 and `GET /config` returns an empty `googleClientId`.
 ```json
-{ "credential": "<google-id-token>" }
+{ "credential": "<google-id-token>", "referralCode": "CVA1B2C3D4", "language": "bn" }
 ```
 
 ### POST /auth/verify-email

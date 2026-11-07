@@ -18,6 +18,9 @@ export const loginSchema = z.object({
 
 export const googleAuthSchema = z.object({
   credential: z.string().min(1).max(4096),
+  // Sent by the sign-up page; used only when the Google account is new here
+  referralCode: z.string().trim().max(40).optional(),
+  language: z.enum(["en", "bn"]).optional(),
 });
 
 export const forgotPasswordSchema = z.object({ email });

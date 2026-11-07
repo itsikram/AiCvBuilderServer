@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { OAuth2Client } from "google-auth-library";
+import { OAuth2Client, TokenPayload } from "google-auth-library";
 import { Response } from "express";
 import { prisma } from "../config/database.js";
 import { User, comparePassword, hashPassword, serializeUser, subscriptionOf, usageOf } from "../models/User.js";
@@ -44,7 +44,7 @@ const promoteAutoAdmin = async (user: User) => {
   return prisma.user.update({ where: { id: user.id }, data: { role: "admin" } });
 };
 
-const sendTokens = async (res: Response, current: User) => {
+const sendTokens = async (res: Response, current: User, extra: { isNewUser?: boolean } = {}) => {
   const user = await promoteAutoAdmin(current);
   const payload = {
     userId: user.id,
@@ -75,6 +75,7 @@ const sendTokens = async (res: Response, current: User) => {
         referralCode: user.referralCode,
       },
       accessToken,
+      ...extra,
     },
   });
 };
@@ -95,6 +96,18 @@ const uploadProfilePicture = async (file?: Express.Multer.File) => {
 
 const newReferralCode = () => `CV${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
 
+/** The id of the user who owns an invite code, or undefined for an empty or unknown code. */
+const findReferrer = async (referralCode: unknown) => {
+  if (!referralCode) return undefined;
+  const referrer = await prisma.user.findUnique({ where: { referralCode: String(referralCode).trim().toUpperCase() } });
+  return referrer?.id;
+};
+
+/** Counted only once the new account exists, so a failed sign-up does not count as an invite. */
+const countReferral = async (referrerId: string | undefined) => {
+  if (referrerId) await prisma.user.update({ where: { id: referrerId }, data: { referralCount: { increment: 1 } } });
+};
+
 export const register = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { name, password, referralCode, language } = req.body;
   const email = normalizeEmail(req.body.email);
@@ -105,14 +118,7 @@ export const register = asyncHandler(async (req: AuthRequest, res: Response) => 
   const verificationToken = crypto.randomBytes(32).toString("hex");
   const avatar = await uploadProfilePicture(req.file);
 
-  let referredById: string | undefined;
-  if (referralCode) {
-    const referrer = await prisma.user.findUnique({ where: { referralCode: String(referralCode).toUpperCase() } });
-    if (referrer) {
-      referredById = referrer.id;
-      await prisma.user.update({ where: { id: referrer.id }, data: { referralCount: { increment: 1 } } });
-    }
-  }
+  const referredById = await findReferrer(referralCode);
 
   const user = await prisma.user.create({
     data: {
@@ -128,6 +134,7 @@ export const register = asyncHandler(async (req: AuthRequest, res: Response) => 
     },
   });
 
+  await countReferral(referredById);
   announceNewUser(req, user, "email", Boolean(referredById));
   // The account already exists, so a failed email must not turn sign-up into an error
   await sendVerificationEmail(email, name, verificationToken).catch(() => undefined);
@@ -150,49 +157,63 @@ export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
   await sendTokens(res, user);
 });
 
+/**
+ * Sign in or sign up with a Google ID token from the "Continue with Google" button. A new account
+ * gets the invite code and language the sign-up page sends; an existing email account is linked.
+ */
 export const googleLogin = asyncHandler(async (req: AuthRequest, res: Response) => {
   const google = await getGoogleClient();
   if (!google) throw new ApiError(503, "Google login not configured");
 
-  const { credential } = req.body;
-  const ticket = await google.client.verifyIdToken({
-    idToken: credential,
-    audience: google.clientId,
-  });
-  const payload = ticket.getPayload();
+  const { credential, referralCode, language } = req.body;
+  let payload: TokenPayload | undefined;
+  try {
+    const ticket = await google.client.verifyIdToken({ idToken: credential, audience: google.clientId });
+    payload = ticket.getPayload();
+  } catch {
+    // An expired token, or one issued for another client ID (a wrong ID in Admin -> Settings)
+    throw new ApiError(401, "Google sign-in could not be verified. Please try again.");
+  }
   if (!payload?.email) throw new ApiError(400, "Invalid Google token");
   // Linking marks the account verified (and may make it admin), so Google must vouch for the email
   if (payload.email_verified === false) throw new ApiError(400, "Your Google email address is not verified");
   const email = normalizeEmail(payload.email);
 
   let user = await prisma.user.findFirst({ where: { OR: [{ googleId: payload.sub }, { email }] } });
+  const isNewUser = !user;
 
   if (!user) {
+    const referredById = await findReferrer(referralCode);
     user = await prisma.user.create({
       data: {
-        name: payload.name || email.split("@")[0],
+        name: (payload.name || email.split("@")[0]).slice(0, 100),
         email,
         googleId: payload.sub,
         avatar: payload.picture,
         isEmailVerified: true,
+        language: normalizeLanguage(language || "en"),
         referralCode: newReferralCode(),
+        referredById,
         lastLoginAt: new Date(),
       },
     });
+    await countReferral(referredById);
     await trackEvent("newUsers");
-    announceNewUser(req, user, "google");
+    announceNewUser(req, user, "google", Boolean(referredById));
   } else {
     user = await prisma.user.update({
       where: { id: user.id },
       data: {
         lastLoginAt: new Date(),
         ...(!user.googleId && { googleId: payload.sub, isEmailVerified: true }),
+        ...(!user.avatar && payload.picture && { avatar: payload.picture }),
       },
     });
+    await trackEvent("activeUsers");
     recordActivity({ userId: user.id, type: "user.login", message: "Logged in with Google", metadata: { method: "google" }, req });
   }
 
-  await sendTokens(res, user);
+  await sendTokens(res, user, { isNewUser });
 });
 
 export const refreshToken = asyncHandler(async (req: AuthRequest, res: Response) => {
