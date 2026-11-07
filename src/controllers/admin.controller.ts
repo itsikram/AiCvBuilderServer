@@ -519,8 +519,25 @@ export const deletePageContent = asyncHandler(async (req: AuthRequest, res: Resp
   });
 });
 
+/** Every entry, including inactive ones, for the admin content manager. */
 export const getAllPageContents = asyncHandler(async (_req: AuthRequest, res: Response) => {
   const contents = await prisma.pageContent.findMany({ orderBy: [{ pageId: "asc" }, { language: "asc" }] });
+
+  res.json({
+    success: true,
+    data: contents.map(serializePageContent),
+  });
+});
+
+/**
+ * Active entries only, for the public site. The frontend's build embeds this response in every
+ * prerendered page (so the text is in the HTML crawlers index), so inactive drafts stay out of it.
+ */
+export const getPublicPageContents = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const contents = await prisma.pageContent.findMany({
+    where: { isActive: true },
+    orderBy: [{ pageId: "asc" }, { language: "asc" }],
+  });
 
   res.json({
     success: true,
