@@ -257,6 +257,28 @@ SSLCommerz IPN callback (server-to-server).
 
 ---
 
+## Free Premium trial
+
+One per account, no payment details. Its length is the Premium plan's `trialDays` (Admin -> Plans,
+0 to 90; 0 turns it off; seeded as 7). During the trial the user's subscription is
+`{ plan: "premium", status: "trial", expiresAt }`. When `expiresAt` passes, Premium access stops at
+once (the API reports the Free plan), and an hourly job moves the stored row back to Free and logs
+`trial.ended`. Admin -> Settings -> Features -> "Free trial needs a verified email" (off by default)
+makes unverified users verify first.
+
+### GET /payments/trial (auth)
+```json
+{ "days": 7, "available": true, "active": false }
+```
+`reason` is `used`, `premium`, `unverified` or `none` when `available` is false; `endsAt` is set
+while `active`.
+
+### POST /payments/trial (auth)
+Starts the trial. Returns `{ trial, subscription }`. 409 if already used or already Premium, 403
+if the email must be verified first, 404 if no trial is offered.
+
+---
+
 ## Admin (requires admin role)
 
 Public: `GET /page-content` returns active Page Content entries only; the admin list

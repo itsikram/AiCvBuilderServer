@@ -23,6 +23,8 @@ export const ACTIVITY_TYPES = {
   "payment.completed": "Payment completed",
   "payment.failed": "Payment failed or rejected",
   "plan.changed": "Plan changed by admin",
+  "trial.started": "Started a free trial",
+  "trial.ended": "Free trial ended",
 } as const;
 
 export type ActivityType = keyof typeof ACTIVITY_TYPES;

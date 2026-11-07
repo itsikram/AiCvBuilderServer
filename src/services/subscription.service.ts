@@ -1,9 +1,10 @@
 import { prisma } from "../config/database.js";
-import type { User } from "../models/User.js";
+import { subscriptionOf, trialEnded, type User } from "../models/User.js";
 import { planLimitsOf } from "../models/serializers.js";
 import { ApiError } from "../utils/ApiError.js";
 import { config } from "../config/index.js";
-import { getIntSetting } from "./settings.service.js";
+import { getBoolSetting, getIntSetting } from "./settings.service.js";
+import { recordActivity } from "./activity.service.js";
 import { BUILT_IN_PLAN_LIMITS } from "./planDefaults.js";
 
 export interface PlanLimits {
@@ -20,7 +21,11 @@ export interface PlanLimits {
 
 type FeatureFlag = "watermarkPdf" | "premiumTemplates" | "atsChecker" | "coverLetters" | "aiOptimization";
 
-const isPremium = (user: User) => user.subscriptionPlan === "premium" && user.subscriptionStatus === "active";
+/** Paid Premium, or a free trial that hasn't ended (subscriptionOf() reports an ended trial as Free). */
+export const isPremium = (user: User) => {
+  const { plan, status } = subscriptionOf(user);
+  return plan === "premium" && (status === "active" || status === "trial");
+};
 
 /**
  * Effective limits for a user. Base values come from the plan documents (Admin ->
@@ -153,4 +158,114 @@ export const activatePremium = async (
   const data = { subscriptionPlan: "premium", subscriptionStatus: "active", subscriptionExpiresAt: expiresAt } as const;
   await prisma.user.update({ where: { id: user.id }, data });
   Object.assign(user, data);
+};
+
+// ---------------------------------------------------------------------------------------------
+// Free Premium trial: one per account, as long as the Premium plan's trialDays (Admin -> Plans).
+// While it runs the user is on Premium with status "trial"; when subscriptionExpiresAt passes,
+// isPremium() is false at once and endExpiredTrials() moves the row back to the Free plan.
+// ---------------------------------------------------------------------------------------------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Days of free trial on offer: the active Premium plan's trialDays, 0 when there is none. */
+export const premiumTrialDays = async (): Promise<number> => {
+  const plan = await prisma.subscriptionPlan.findUnique({ where: { slug: "premium" }, select: { trialDays: true, isActive: true } });
+  return plan?.isActive ? Math.max(0, Math.floor(plan.trialDays)) : 0;
+};
+
+export type TrialUnavailable = "used" | "premium" | "unverified" | "none";
+
+export interface TrialInfo {
+  /** Trial length on offer, in days (0: no trial offered) */
+  days: number;
+  available: boolean;
+  /** Why it can't be started, when it can't */
+  reason?: TrialUnavailable;
+  /** True while the user's trial is running */
+  active: boolean;
+  startedAt?: Date;
+  /** When the running trial ends */
+  endsAt?: Date;
+}
+
+const TRIAL_REFUSALS: Record<TrialUnavailable, [status: number, message: string]> = {
+  used: [409, "You've already used your free trial. Upgrade to keep Premium features."],
+  premium: [409, "You already have Premium."],
+  unverified: [403, "Verify your email address first, then start your free trial."],
+  none: [404, "There's no free trial on offer right now."],
+};
+
+/** Whether this user can start the free trial, and the state of theirs. */
+export const getTrialInfo = async (user: User): Promise<TrialInfo> => {
+  const days = await premiumTrialDays();
+  const active = user.subscriptionStatus === "trial" && !trialEnded(user);
+  const state = {
+    days,
+    active,
+    startedAt: user.trialStartedAt ?? undefined,
+    endsAt: active ? (user.subscriptionExpiresAt ?? undefined) : undefined,
+  };
+  const reason: TrialUnavailable | undefined = user.trialStartedAt
+    ? "used"
+    : isPremium(user)
+      ? "premium"
+      : !days
+        ? "none"
+        : !user.isEmailVerified && (await getBoolSetting("TRIAL_REQUIRES_VERIFIED_EMAIL", false))
+          ? "unverified"
+          : undefined;
+  return reason ? { ...state, available: false, reason } : { ...state, available: true };
+};
+
+/** Starts the user's free Premium trial, or throws why they can't. */
+export const startTrial = async (user: User): Promise<TrialInfo> => {
+  const info = await getTrialInfo(user);
+  if (info.reason) {
+    const [status, message] = TRIAL_REFUSALS[info.reason];
+    throw new ApiError(status, message);
+  }
+  const now = new Date();
+  const data = {
+    subscriptionPlan: "premium",
+    subscriptionStatus: "trial",
+    subscriptionExpiresAt: new Date(now.getTime() + info.days * DAY_MS),
+    trialStartedAt: now,
+  } as const;
+  // `trialStartedAt: null` makes this a one-time switch even if two requests race
+  const { count } = await prisma.user.updateMany({ where: { id: user.id, trialStartedAt: null }, data });
+  if (!count) throw new ApiError(...TRIAL_REFUSALS.used);
+  Object.assign(user, data);
+  return getTrialInfo(user);
+};
+
+/**
+ * Moves trials past their end date back to the Free plan and logs each one. Access already
+ * stopped at the end date (isPremium); this keeps the stored plan, admin lists and stats right.
+ */
+export const endExpiredTrials = async (): Promise<number> => {
+  const ended = await prisma.user.findMany({
+    where: { subscriptionStatus: "trial", subscriptionExpiresAt: { lte: new Date() } },
+    select: { id: true, trialStartedAt: true },
+    take: 1000,
+  });
+  if (!ended.length) return 0;
+  await prisma.user.updateMany({
+    where: { id: { in: ended.map((user) => user.id) }, subscriptionStatus: "trial" },
+    data: { subscriptionPlan: "free", subscriptionStatus: "active", subscriptionExpiresAt: null },
+  });
+  for (const user of ended) {
+    recordActivity({ userId: user.id, type: "trial.ended", message: "Free Premium trial ended; back on the Free plan" });
+  }
+  return ended.length;
+};
+
+/** Runs endExpiredTrials() now and every hour. */
+export const scheduleTrialExpiry = (): void => {
+  const run = () =>
+    endExpiredTrials()
+      .then((count) => count && console.log(`Ended ${count} free trial(s)`))
+      .catch((error: Error) => console.warn(`Ending free trials failed: ${error.message}`));
+  void run();
+  setInterval(run, 60 * 60 * 1000).unref();
 };

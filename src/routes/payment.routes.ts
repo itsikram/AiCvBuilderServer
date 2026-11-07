@@ -10,6 +10,8 @@ router.post("/sslcommerz/ipn", paymentController.sslcommerzIPN);
 
 router.use(authenticate);
 router.get("/history", paymentController.getPaymentHistory);
+router.get("/trial", paymentController.getTrial);
+router.post("/trial", paymentController.startFreeTrial);
 router.get("/bkash/config", paymentController.getBkashConfig);
 router.post("/sslcommerz", paymentController.payWithSSLCommerz);
 router.post("/bkash", paymentController.payWithBkash);

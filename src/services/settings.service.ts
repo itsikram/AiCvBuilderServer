@@ -157,6 +157,15 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: "MAINTENANCE_MODE", group: "features", label: "Maintenance mode", type: "boolean", envFallback: false, default: "false" },
   { key: "REGISTRATION_ENABLED", group: "features", label: "Registration enabled", type: "boolean", envFallback: false, default: "true" },
   {
+    key: "TRIAL_REQUIRES_VERIFIED_EMAIL",
+    group: "features",
+    label: "Free trial needs a verified email",
+    type: "boolean",
+    help: "Stops people starting many trials with made-up addresses. Turn on only once verification emails are delivered (Email (SMTP)). The trial length is set in Admin -> Plans",
+    envFallback: false,
+    default: "false",
+  },
+  {
     key: "ACTIVITY_RETENTION_DAYS",
     group: "features",
     label: "Keep user activity for (days)",

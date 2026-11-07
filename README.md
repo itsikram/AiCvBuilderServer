@@ -29,7 +29,7 @@ API for a bilingual (Bangla/English) CV builder for the Bangladesh job market: C
 - **Dark/Light mode**
 - **Authentication** — JWT + Google OAuth + email verification + password reset
 - **Payments** — SSLCommerz, bKash, Nagad (integration-ready)
-- **Subscription plans** — Free (2 resumes) & Premium (unlimited)
+- **Subscription plans** — Free (2 resumes) & Premium (unlimited), with a free Premium trial (7 days by default, no payment details; set in Admin → Plans)
 - **Referral & coupon system**
 - **Admin panel** — Users, revenue, coupons, templates, blogs, settings with a "send test email" check
 - **User activity log** — Admin → User activity: sign-ups, logins, CVs, AI use, purchase requests and payments per user, with filters
@@ -234,6 +234,7 @@ MongoDB is only read. The script skips rows that already exist, so it can be re-
 | Cover letters | No | Yes |
 | AI optimization | No | Yes |
 | Price | ৳0 | ৳499/mo |
+| Free trial | — | 7 days, once per account |
 
 These are the seeded defaults. Plan limits are edited in Admin → Plans; Admin → Settings can override
 `MAX_RESUMES_*`, `MAX_AI_REQUESTS_*` (per month) and `AI_DAILY_QUOTA_*` (per day, resets at midnight

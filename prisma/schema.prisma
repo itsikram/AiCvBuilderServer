@@ -108,6 +108,9 @@ model User {
   subscriptionPlan         PlanTier           @default(free)
   subscriptionStatus       SubscriptionStatus @default(active)
   subscriptionExpiresAt    DateTime?
+  /// When the user started their one free Premium trial (null: never). While on it, the plan is
+  /// premium with status "trial" until subscriptionExpiresAt.
+  trialStartedAt           DateTime?
   resumesCreated           Int                @default(0)
   aiRequestsThisMonth      Int                @default(0)
   lastAiReset              DateTime           @default(now())
@@ -234,6 +237,8 @@ model SubscriptionPlan {
   atsChecker       Boolean  @default(false)
   coverLetters     Boolean  @default(false)
   aiOptimization   Boolean  @default(false)
+  /// Days of free trial offered for this plan (the Premium plan's is used); 0 means no trial
+  trialDays        Int      @default(0)
   isActive         Boolean  @default(true)
   sortOrder        Int      @default(0)
   createdAt        DateTime @default(now())

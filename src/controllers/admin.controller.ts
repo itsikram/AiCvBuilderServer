@@ -794,6 +794,9 @@ export const getSubscriptionPlans = asyncHandler(async (_req: AuthRequest, res: 
   });
 });
 
+/** Free-trial length from the admin form: a whole number of days, 0 (no trial) to 90. */
+const trialDaysOf = (value: unknown) => Math.min(90, Math.max(0, Math.floor(Number(value) || 0)));
+
 export const createSubscriptionPlan = asyncHandler(async (req: AuthRequest, res: Response) => {
   const {
     name,
@@ -806,6 +809,7 @@ export const createSubscriptionPlan = asyncHandler(async (req: AuthRequest, res:
     limits,
     isActive = true,
     sortOrder = 0,
+    trialDays = 0,
   } = req.body;
 
   if (!name || !slug) {
@@ -835,6 +839,7 @@ export const createSubscriptionPlan = asyncHandler(async (req: AuthRequest, res:
       ...planLimitsData(limits),
       isActive: Boolean(isActive),
       sortOrder: Number(sortOrder) || 0,
+      trialDays: trialDaysOf(trialDays),
     },
   });
 
@@ -873,6 +878,7 @@ export const updateSubscriptionPlan = asyncHandler(async (req: AuthRequest, res:
   if (updateData.limits !== undefined) Object.assign(data, planLimitsData(updateData.limits));
   if (updateData.isActive !== undefined) data.isActive = Boolean(updateData.isActive);
   if (updateData.sortOrder !== undefined) data.sortOrder = Number(updateData.sortOrder) || 0;
+  if (updateData.trialDays !== undefined) data.trialDays = trialDaysOf(updateData.trialDays);
 
   const updated = await prisma.subscriptionPlan.update({ where: { id }, data });
 

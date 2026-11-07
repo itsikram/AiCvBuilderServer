@@ -13,11 +13,19 @@ export const comparePassword = async (user: Pick<User, "password">, candidate: s
 };
 
 /** The subscription fields in the nested shape the API has always returned */
-export const subscriptionOf = (user: User) => ({
-  plan: user.subscriptionPlan,
-  status: user.subscriptionStatus,
-  expiresAt: user.subscriptionExpiresAt ?? undefined,
-});
+export const subscriptionOf = (user: User) =>
+  trialEnded(user)
+    ? // The stored row is switched to Free by endExpiredTrials() within the hour; until then, report it already
+      { plan: "free" as const, status: "active" as const, expiresAt: undefined }
+    : {
+        plan: user.subscriptionPlan,
+        status: user.subscriptionStatus,
+        expiresAt: user.subscriptionExpiresAt ?? undefined,
+      };
+
+/** A free trial whose end date has passed. Its Premium access stops at that moment. */
+export const trialEnded = (user: Pick<User, "subscriptionStatus" | "subscriptionExpiresAt">, now = new Date()) =>
+  user.subscriptionStatus === "trial" && (!user.subscriptionExpiresAt || user.subscriptionExpiresAt.getTime() <= now.getTime());
 
 export const usageOf = (user: User) => ({
   resumesCreated: user.resumesCreated,

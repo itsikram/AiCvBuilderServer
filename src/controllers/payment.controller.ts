@@ -14,6 +14,9 @@ import { serializePayment, serializePaymentConfig, serializePlan } from "../mode
 import { ApiError } from "../utils/ApiError.js";
 import { apiOriginOf } from "../utils/requestOrigin.js";
 import { announcePurchaseRequest } from "../services/notification.service.js";
+import { getTrialInfo, startTrial } from "../services/subscription.service.js";
+import { recordActivity } from "../services/activity.service.js";
+import { subscriptionOf } from "../models/User.js";
 
 const normalizeBkashNumber = (value?: string | null) =>
   (value || "").trim().replace(/\s+/g, "").replace(/^\+?880/, "0");
@@ -124,6 +127,35 @@ export const payWithNagad = asyncHandler(async (req: AuthRequest, res: Response)
   const result = await initiateNagadPayment(req.user!.userId, planSlug, billingCycle);
   announcePurchaseRequest(req, result.transactionId);
   res.json({ success: true, data: result });
+});
+
+const currentUser = async (req: AuthRequest) => {
+  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+  if (!user) throw new ApiError(404, "User not found");
+  return user;
+};
+
+/** The signed-in user's free trial: whether they can start it, or how long theirs runs. */
+export const getTrial = asyncHandler(async (req: AuthRequest, res: Response) => {
+  res.json({ success: true, data: await getTrialInfo(await currentUser(req)) });
+});
+
+/** Starts the free Premium trial (no payment details needed). */
+export const startFreeTrial = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const user = await currentUser(req);
+  const trial = await startTrial(user);
+  recordActivity({
+    userId: user.id,
+    type: "trial.started",
+    message: `Started a ${trial.days}-day free Premium trial`,
+    metadata: { days: trial.days, endsAt: trial.endsAt?.toISOString() },
+    req,
+  });
+  res.json({
+    success: true,
+    message: `Your ${trial.days}-day free Premium trial has started.`,
+    data: { trial, subscription: subscriptionOf(user) },
+  });
 });
 
 export const getPaymentHistory = asyncHandler(async (req: AuthRequest, res: Response) => {

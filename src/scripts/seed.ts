@@ -491,6 +491,8 @@ const plans = [
       coverLetters: true,
       aiOptimization: true,
     },
+    // Free Premium trial for new accounts (Admin -> Plans); 0 turns it off
+    trialDays: 7,
     sortOrder: 2,
   },
 ];
