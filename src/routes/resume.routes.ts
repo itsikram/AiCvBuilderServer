@@ -19,8 +19,13 @@ import {
   grammarSchema,
   translateResumeSchema,
   importTextSchema,
+  interviewQuestionsSchema,
+  interviewFeedbackSchema,
+  coachChatSchema,
+  applyEditsSchema,
 } from "../validators/resume.validator.js";
 import * as resumeAiController from "../controllers/resumeAi.controller.js";
+import * as careerAiController from "../controllers/careerAi.controller.js";
 import { aiLimiter } from "../middleware/rateLimit.middleware.js";
 import multer from "multer";
 import { resolveCvMimeType } from "../services/pdf-extraction.service.js";
@@ -57,6 +62,9 @@ router.post("/ai/suggest-skills", aiLimiter, validate(suggestSkillsSchema), resu
 router.post("/ai/grammar", aiLimiter, validate(grammarSchema), resumeAiController.grammarCheck);
 router.post("/ai/improve", aiLimiter, validate(improveResumeSchema), resumeController.improveWithAI);
 router.post("/ai/ats-check", aiLimiter, validate(atsCheckSchema), resumeController.checkATS);
+router.post("/ai/interview/questions", aiLimiter, validate(interviewQuestionsSchema), careerAiController.interviewQuestions);
+router.post("/ai/interview/feedback", aiLimiter, validate(interviewFeedbackSchema), careerAiController.interviewFeedback);
+router.post("/ai/coach", aiLimiter, validate(coachChatSchema), careerAiController.coachChat);
 router.post("/upload-parse", aiLimiter, upload.single("file"), resumeController.uploadAndParseResume);
 router.post("/import-text", aiLimiter, validate(importTextSchema), resumeController.importFromText);
 
@@ -69,6 +77,7 @@ router.delete("/:id", resumeController.deleteResume);
 router.post("/:id/duplicate", resumeController.duplicateResume);
 router.post("/:id/toggle-public", resumeController.togglePublic);
 router.post("/:id/translate", aiLimiter, validate(translateResumeSchema), resumeAiController.translateResume);
+router.post("/:id/apply-edits", validate(applyEditsSchema), careerAiController.applyEdits);
 router.get("/:id/export-pdf", resumeController.exportPDF);
 router.post("/:id/exported", resumeController.recordExport);
 router.patch("/:id/sections", validate(reorderSectionsSchema), resumeController.reorderSections);

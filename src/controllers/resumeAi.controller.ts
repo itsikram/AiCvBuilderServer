@@ -10,7 +10,15 @@ import { normalizeLanguage } from "../utils/language.js";
 import { generateUniqueSlug } from "../utils/slug.js";
 import { geminiService } from "../services/ai/gemini.service.js";
 import { cvToText } from "../services/ai/cvText.js";
-import { applyTextUpdates, collectTextFields, fieldsToPrompt, type TextField } from "../services/ai/cvFields.js";
+import {
+  applyTextUpdates,
+  collectTextFields,
+  editableFields,
+  fieldsToPrompt,
+  toCvEdits,
+  type CvEdit,
+  type TextField,
+} from "../services/ai/cvFields.js";
 import { checkAiLimit, checkResumeLimit, getAiQuota, incrementAiUsage } from "../services/subscription.service.js";
 import { trackEvent } from "../services/analytics.service.js";
 import type {
@@ -25,14 +33,14 @@ import type {
 
 type Body<S extends z.ZodTypeAny> = z.infer<S>;
 
-const loadUser = async (req: AuthRequest) => {
+export const loadUser = async (req: AuthRequest) => {
   const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (!user) throw new ApiError(404, "User not found");
   return user;
 };
 
 /** Runs one quota-counted AI request: checks the limits first and counts only successes. */
-const withAiQuota = async <T>(req: AuthRequest, run: (user: User) => Promise<T>): Promise<T> => {
+export const withAiQuota = async <T>(req: AuthRequest, run: (user: User) => Promise<T>): Promise<T> => {
   const user = await loadUser(req);
   await checkAiLimit(user);
   const result = await run(user);
@@ -98,14 +106,7 @@ export const suggestSkills = asyncHandler(async (req: AuthRequest, res: Response
   res.json({ success: true, data: { skills, reasoning: data.reasoning } });
 });
 
-export interface TailorEdit {
-  key: string;
-  type: "rewrite" | "add_skill";
-  path: string;
-  before: string;
-  after: string;
-  reason: string;
-}
+export type TailorEdit = CvEdit;
 
 export const tailorResume = asyncHandler(async (req: AuthRequest, res: Response) => {
   const body = req.body as Body<typeof tailorResumeSchema>;
@@ -114,28 +115,9 @@ export const tailorResume = asyncHandler(async (req: AuthRequest, res: Response)
   if (!cvText.trim()) throw new ApiError(400, "Add some CV content before tailoring it to a job.");
 
   // Prose plus job titles: the parts worth rewriting for a specific job
-  const fields = collectTextFields(content, "all").filter(
-    (f) => !f.name && !/^(skills|interests|languages|personalDetails)\b|\.(location|duration|board)$/.test(f.path)
-  );
+  const fields = editableFields(content);
   const result = await withAiQuota(req, () => geminiService.tailorResume(cvText, fieldsToPrompt(fields), body.jobDescription, body.language));
-
-  const lookup = byId(fields);
-  const existingSkills = new Set((content.skills ?? []).map((s) => s.trim().toLowerCase()));
-  const edits: TailorEdit[] = [];
-  result.edits.forEach((edit, i) => {
-    const after = edit.after.trim();
-    if (!after) return;
-    if (edit.id === "skill") {
-      if (existingSkills.has(after.toLowerCase())) return;
-      existingSkills.add(after.toLowerCase());
-      edits.push({ key: `e${i}`, type: "add_skill", path: "skills", before: "", after, reason: edit.reason });
-      return;
-    }
-    const field = lookup.get(edit.id);
-    if (field && field.text.trim() !== after) {
-      edits.push({ key: `e${i}`, type: "rewrite", path: field.path, before: field.text, after, reason: edit.reason });
-    }
-  });
+  const edits = toCvEdits(result.edits, fields, content.skills);
 
   res.json({
     success: true,

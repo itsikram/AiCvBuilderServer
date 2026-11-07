@@ -122,3 +122,102 @@ export function applyTextUpdates<T extends object>(content: T, updates: Array<{ 
   }
   return copy;
 }
+
+/** Prose and job titles: the fields worth rewriting for a job (no names, skills or personal details). */
+export const editableFields = (content: Content | undefined): TextField[] =>
+  collectTextFields(content, "all").filter(
+    (f) => !f.name && !/^(skills|interests|languages|personalDetails)\b|\.(location|duration|board)$/.test(f.path)
+  );
+
+/** A CV change the user approves one by one (tailoring, career coach). */
+export interface CvEdit {
+  key: string;
+  type: "rewrite" | "add_skill";
+  path: string;
+  before: string;
+  after: string;
+  reason: string;
+}
+
+/**
+ * Maps the model's edits (field ids, or "skill") back to CV paths. Unknown ids,
+ * unchanged text and skills the CV already lists are dropped.
+ */
+export function toCvEdits(
+  raw: Array<{ id: string; after: string; reason: string }>,
+  fields: TextField[],
+  existingSkills: string[] = []
+): CvEdit[] {
+  const lookup = new Map(fields.map((f) => [f.id, f]));
+  const skills = new Set(existingSkills.map((s) => s.trim().toLowerCase()));
+  const edits: CvEdit[] = [];
+  raw.forEach((edit, i) => {
+    const after = edit.after.trim();
+    if (!after) return;
+    if (edit.id === "skill") {
+      if (skills.has(after.toLowerCase())) return;
+      skills.add(after.toLowerCase());
+      edits.push({ key: `e${i}`, type: "add_skill", path: "skills", before: "", after, reason: edit.reason });
+      return;
+    }
+    const field = lookup.get(edit.id);
+    if (field && field.text.trim() !== after) {
+      edits.push({ key: `e${i}`, type: "rewrite", path: field.path, before: field.text, after, reason: edit.reason });
+    }
+  });
+  return edits;
+}
+
+// Same limits as resumeContentSchema (validators/resume.validator.ts), so an applied edit always saves
+const FIELD_LIMITS: Array<[RegExp, number]> = [
+  [/^personalInfo\.summary$/, 3000],
+  [/^careerObjective$/, 2000],
+  [/^personalInfo\.jobTitle$/, 120],
+  [/^experience\.\d+\.bullets\.\d+$/, 1000],
+  [/^projects\.\d+\.description$/, 2000],
+  [/^customSections\.\d+\.content$/, 5000],
+  [/^customSections\.\d+\.title$/, 120],
+  [/^publications\.\d+\.title$/, 300],
+  [/\.description$/, 1000],
+];
+const MAX_SKILLS = 100;
+const MAX_SKILL_LENGTH = 100;
+
+export const fieldLimit = (path: string) => FIELD_LIMITS.find(([pattern]) => pattern.test(path))?.[1] ?? 200;
+
+/**
+ * Applies approved edits to a saved CV. A rewrite only replaces an editable field
+ * that still holds the text the suggestion was made for (the user may have changed
+ * it since); anything else is skipped. Returns a copy; `content` is not changed.
+ */
+export function applyCvEdits<T extends Content>(
+  content: T,
+  edits: Array<Pick<CvEdit, "type" | "path" | "before" | "after">>
+): { content: T; results: Array<"applied" | "skipped">; applied: number; skipped: number } {
+  let next = JSON.parse(JSON.stringify(content)) as T;
+  const results: Array<"applied" | "skipped"> = [];
+  for (const edit of edits) {
+    const after = edit.after.trim();
+    if (edit.type === "add_skill") {
+      const skills = (next.skills ?? []).filter((s) => s.trim());
+      if (skills.some((s) => s.trim().toLowerCase() === after.toLowerCase())) {
+        results.push("applied");
+      } else if (after && after.length <= MAX_SKILL_LENGTH && skills.length < MAX_SKILLS) {
+        next = { ...next, skills: [...skills, after] };
+        results.push("applied");
+      } else {
+        results.push("skipped");
+      }
+      continue;
+    }
+    const editable = new Set(editableFields(next).map((f) => f.path));
+    if (!after || !editable.has(edit.path) || getAtPath(next, edit.path) !== edit.before || after.length > fieldLimit(edit.path)) {
+      results.push("skipped");
+      continue;
+    }
+    next = applyTextUpdates(next, [{ path: edit.path, text: after }]);
+    results.push("applied");
+  }
+  const applied = results.filter((r) => r === "applied").length;
+  return { content: next, results, applied, skipped: results.length - applied };
+}
