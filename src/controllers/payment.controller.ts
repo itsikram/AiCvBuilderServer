@@ -13,6 +13,7 @@ import { asJson } from "../models/Resume.js";
 import { serializePayment, serializePaymentConfig, serializePlan } from "../models/serializers.js";
 import { ApiError } from "../utils/ApiError.js";
 import { apiOriginOf } from "../utils/requestOrigin.js";
+import { announcePurchaseRequest } from "../services/notification.service.js";
 
 const normalizeBkashNumber = (value?: string | null) =>
   (value || "").trim().replace(/\s+/g, "").replace(/^\+?880/, "0");
@@ -45,6 +46,7 @@ export const payWithSSLCommerz = asyncHandler(async (req: AuthRequest, res: Resp
     couponCode,
     apiOriginOf(req)
   );
+  announcePurchaseRequest(req, result.transactionId);
   res.json({ success: true, data: result });
 });
 
@@ -103,6 +105,8 @@ export const payWithBkash = asyncHandler(async (req: AuthRequest, res: Response)
     },
   });
 
+  announcePurchaseRequest(req, payment.transactionId);
+
   res.json({
     success: true,
     data: {
@@ -118,6 +122,7 @@ export const payWithBkash = asyncHandler(async (req: AuthRequest, res: Response)
 export const payWithNagad = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { planSlug, billingCycle } = req.body;
   const result = await initiateNagadPayment(req.user!.userId, planSlug, billingCycle);
+  announcePurchaseRequest(req, result.transactionId);
   res.json({ success: true, data: result });
 });
 

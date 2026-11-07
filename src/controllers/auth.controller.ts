@@ -10,6 +10,8 @@ import { generateAccessToken, generateRefreshToken } from "../utils/tokens.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 import { sendVerificationEmail, sendPasswordResetEmail } from "../services/email.service.js";
 import { trackEvent } from "../services/analytics.service.js";
+import { recordActivity } from "../services/activity.service.js";
+import { announceNewUser } from "../services/notification.service.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
 import { normalizeLanguage } from "../utils/language.js";
 import { qualifiesForAutoAdmin } from "../utils/autoAdmin.js";
@@ -124,6 +126,7 @@ export const register = asyncHandler(async (req: AuthRequest, res: Response) => 
     },
   });
 
+  announceNewUser(req, user, "email", Boolean(referredById));
   // The account already exists, so a failed email must not turn sign-up into an error
   await sendVerificationEmail(email, name, verificationToken).catch(() => undefined);
   await trackEvent("newUsers");
@@ -140,6 +143,7 @@ export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
 
   const user = await prisma.user.update({ where: { id: found.id }, data: { lastLoginAt: new Date() } });
   await trackEvent("activeUsers");
+  recordActivity({ userId: user.id, type: "user.login", message: "Logged in with email", metadata: { method: "email" }, req });
 
   await sendTokens(res, user);
 });
@@ -174,6 +178,7 @@ export const googleLogin = asyncHandler(async (req: AuthRequest, res: Response) 
       },
     });
     await trackEvent("newUsers");
+    announceNewUser(req, user, "google");
   } else {
     user = await prisma.user.update({
       where: { id: user.id },
@@ -182,6 +187,7 @@ export const googleLogin = asyncHandler(async (req: AuthRequest, res: Response) 
         ...(!user.googleId && { googleId: payload.sub, isEmailVerified: true }),
       },
     });
+    recordActivity({ userId: user.id, type: "user.login", message: "Logged in with Google", metadata: { method: "google" }, req });
   }
 
   await sendTokens(res, user);
@@ -239,6 +245,7 @@ export const verifyEmail = asyncHandler(async (req: AuthRequest, res: Response) 
     data: { isEmailVerified: true, emailVerificationToken: null, emailVerificationExpires: null },
   });
   await promoteAutoAdmin(verified);
+  recordActivity({ userId: verified.id, type: "user.email_verified", message: `Verified email ${verified.email}`, req });
 
   res.json({ success: true, message: "Email verified successfully" });
 });
@@ -289,6 +296,7 @@ export const resetPassword = asyncHandler(async (req: AuthRequest, res: Response
     },
   });
   await promoteAutoAdmin(updated);
+  recordActivity({ userId: updated.id, type: "user.password_reset", message: "Reset password from the emailed link", req });
 
   res.json({ success: true, message: "Password reset successful" });
 });

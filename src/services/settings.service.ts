@@ -54,12 +54,24 @@ const planLimit = (slug: "free" | "premium", field: "maxResumes" | "maxAiRequest
 
 const billingPage = (result: string) => () => `${config.clientUrl}/dashboard/billing?payment=${result}`;
 
+/** Every admin account's email, the default recipients of admin notifications. */
+const adminEmails = async () => {
+  try {
+    const admins = await prisma.user.findMany({ where: { role: "admin" }, select: { email: true }, orderBy: { createdAt: "asc" } });
+    return admins.map((admin) => admin.email).join(", ");
+  } catch (error) {
+    console.warn(`Could not read the admin accounts: ${(error as Error).message}`);
+    return "";
+  }
+};
+
 export const SETTING_GROUPS = [
   { id: "site", title: "Site", description: "Branding and contact details" },
   { id: "limits", title: "User limits", description: "Override the plan limits (Admin -> Plans). Leave empty to use the plan value; -1 means unlimited. Daily AI quotas reset at midnight Bangladesh time." },
   { id: "ai", title: "Gemini AI", description: "Keys from https://aistudio.google.com/apikey. Requests rotate between keys and skip rate-limited ones." },
   { id: "google", title: "Google Sign-In", description: "Web client ID from Google Cloud Console. Leave empty to hide the Google button." },
-  { id: "email", title: "Email (SMTP)", description: "Used for verification and password-reset emails." },
+  { id: "email", title: "Email (SMTP)", description: "Used for verification, password-reset and admin notification emails." },
+  { id: "notifications", title: "Admin notifications", description: "Emails to admins when someone signs up, asks to buy Premium or creates a CV. Sent with the Email (SMTP) settings above." },
   { id: "storage", title: "Cloudinary", description: "Profile photos, blog covers and uploaded CV files." },
   { id: "payments", title: "SSLCommerz", description: "Card and mobile banking checkout." },
   { id: "pdf", title: "PDF import", description: "Optional pdftxt.dev fallback for hard-to-read PDFs." },
@@ -100,6 +112,27 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: "SMTP_PASS", group: "email", label: "SMTP password", type: "secret" },
   { key: "EMAIL_FROM", group: "email", label: "From address", type: "text", default: "AI CV Builder BD <noreply@aicvbuilderbd.online>" },
 
+  {
+    key: "ADMIN_NOTIFICATION_EMAILS",
+    group: "notifications",
+    label: "Send notifications to",
+    type: "text",
+    help: "Comma-separated addresses. Empty sends them to every admin account",
+    default: adminEmails,
+    placeholder: "you@example.com, team@example.com",
+  },
+  { key: "NOTIFY_NEW_USER", group: "notifications", label: "New user signs up", type: "boolean", envFallback: false, default: "true" },
+  {
+    key: "NOTIFY_PURCHASE_REQUEST",
+    group: "notifications",
+    label: "Purchase request",
+    type: "boolean",
+    help: "A bKash payment to review, or a Premium checkout started",
+    envFallback: false,
+    default: "true",
+  },
+  { key: "NOTIFY_CV_CREATED", group: "notifications", label: "CV created", type: "boolean", help: "New, copied, imported, uploaded or translated", envFallback: false, default: "true" },
+
   { key: "CLOUDINARY_CLOUD_NAME", group: "storage", label: "Cloud name", type: "text", placeholder: "your-cloud-name" },
   { key: "CLOUDINARY_API_KEY", group: "storage", label: "API key", type: "text", placeholder: "123456789012345" },
   { key: "CLOUDINARY_API_SECRET", group: "storage", label: "API secret", type: "secret" },
@@ -123,6 +156,15 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
 
   { key: "MAINTENANCE_MODE", group: "features", label: "Maintenance mode", type: "boolean", envFallback: false, default: "false" },
   { key: "REGISTRATION_ENABLED", group: "features", label: "Registration enabled", type: "boolean", envFallback: false, default: "true" },
+  {
+    key: "ACTIVITY_RETENTION_DAYS",
+    group: "features",
+    label: "Keep user activity for (days)",
+    type: "number",
+    help: "Older entries in Admin -> Activity are deleted daily. 0 keeps everything",
+    envFallback: false,
+    default: "180",
+  },
 ];
 
 const definitionsByKey = new Map(SETTING_DEFINITIONS.map((d) => [d.key, d]));

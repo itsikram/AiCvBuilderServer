@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { config } from "../config/index.js";
 import { integrations } from "./settings.service.js";
+import { ApiError } from "../utils/ApiError.js";
 
 export const escapeHtml = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -36,15 +37,51 @@ export const sendEmail = async (
   try {
     await transporter.sendMail({ from: email.from, to, subject, html });
   } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    // EACCES/EPERM on connect: the host's firewall blocks outbound SMTP to that port
-    const hint = err.syscall === "connect" && /EACCES|EPERM/.test(err.message)
-      ? ` (outbound SMTP to ${email.host}:${email.port} is blocked by this host)`
-      : "";
-    console.error(`Email to ${to} failed: ${err.message}${hint}`);
+    console.error(`Email to ${to} failed: ${smtpErrorMessage(error, email)}`);
     throw error;
   }
   return true;
+};
+
+/** The SMTP error, plus a hint when the cause is the host's firewall rather than the settings. */
+const smtpErrorMessage = (error: unknown, email: { host: string; port: number }) => {
+  const err = error as NodeJS.ErrnoException;
+  // EACCES/EPERM on connect: the host's firewall blocks outbound SMTP to that port
+  const hint = err.syscall === "connect" && /EACCES|EPERM/.test(err.message)
+    ? ` (outbound SMTP to ${email.host}:${email.port} is blocked by this host)`
+    : "";
+  return `${err.message}${hint}`;
+};
+
+/**
+ * Sends a test message for Admin -> Settings. Unlike sendEmail() it fails when SMTP isn't set
+ * up (instead of only logging), and reports the SMTP server's error so the admin can fix it.
+ */
+export const sendTestEmail = async (to: string, requestedBy: string) => {
+  const email = await integrations.email();
+  if (!email.host || !email.user) {
+    throw new ApiError(400, "Email isn't set up yet. Enter the SMTP host, username and password under Email (SMTP), save, then send a test.");
+  }
+  try {
+    await sendEmail(
+      to,
+      `Test email from ${config.app.name}`,
+      `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2>Your email settings work</h2>
+        <p>This test was sent from Admin &rarr; Settings by ${escapeHtml(requestedBy)}.</p>
+        <p style="color: #666; font-size: 14px;">
+          Server: ${escapeHtml(email.host)}:${email.port}<br />
+          From: ${escapeHtml(email.from)}<br />
+          Sent: ${new Date().toUTCString()}
+        </p>
+      </div>
+      `
+    );
+  } catch (error) {
+    throw new ApiError(502, `The SMTP server didn't accept the email: ${smtpErrorMessage(error, email)}`);
+  }
+  return { to, host: email.host, port: email.port, from: email.from };
 };
 
 export const sendVerificationEmail = async (

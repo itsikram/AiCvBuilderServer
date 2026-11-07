@@ -27,6 +27,7 @@ import {
 import * as resumeAiController from "../controllers/resumeAi.controller.js";
 import * as careerAiController from "../controllers/careerAi.controller.js";
 import { aiLimiter } from "../middleware/rateLimit.middleware.js";
+import { recordAiUse } from "../services/activity.service.js";
 import multer from "multer";
 import { resolveCvMimeType } from "../services/pdf-extraction.service.js";
 
@@ -53,6 +54,8 @@ router.use(authenticate);
 router.get("/", resumeController.getResumes);
 router.post("/", validate(createResumeSchema), resumeController.createResume);
 
+// Successful AI requests appear in Admin -> Activity
+router.use("/ai", recordAiUse);
 router.get("/ai/quota", resumeAiController.getQuota);
 router.post("/ai/generate", aiLimiter, validate(generateResumeSchema), resumeController.generateWithAI);
 router.post("/ai/tailor", aiLimiter, validate(tailorResumeSchema), resumeAiController.tailorResume);

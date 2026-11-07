@@ -34,6 +34,7 @@ const router = Router();
 router.use(authenticate, requireAdmin);
 
 router.get("/dashboard", adminController.getDashboard);
+router.get("/activity", adminController.getActivity);
 router.get("/users", adminController.getUsers);
 router.patch("/users/:id", byId, validate(adminUpdateUserSchema), adminController.updateUser);
 router.patch("/users/:id/subscription", byId, adminController.updateUserSubscription);
@@ -65,6 +66,7 @@ router.delete("/page-content/:id", adminController.deletePageContent);
 
 // Admin Settings Management (env file values)
 router.get("/settings", adminController.getAdminSettings);
+router.post("/settings/test-email", adminController.sendAdminTestEmail);
 router.put("/settings", adminController.updateAdminSetting);
 router.delete("/settings/:key", adminController.deleteAdminSetting);
 

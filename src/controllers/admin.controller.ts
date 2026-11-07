@@ -5,6 +5,7 @@ import { serializeUser, subscriptionOf } from "../models/User.js";
 import { asJson } from "../models/Resume.js";
 import {
   planLimitsData,
+  serializeActivity,
   serializeBlog,
   serializeCoupon,
   serializePageContent,
@@ -34,6 +35,8 @@ import { uploadBuffer } from "../services/cloudinary.service.js";
 import { normalizeLanguage } from "../utils/language.js";
 import { completePayment } from "../services/payment.service.js";
 import { findActiveBkashConfig } from "./payment.controller.js";
+import { ACTIVITY_TYPES, isActivityType, recordActivity, recordPaymentOutcome } from "../services/activity.service.js";
+import { sendTestEmail } from "../services/email.service.js";
 
 const parseBlogTags = (value: unknown): string[] => {
   if (Array.isArray(value)) {
@@ -213,6 +216,15 @@ export const updateUserSubscription = asyncHandler(async (req: AuthRequest, res:
       ...(expiry && { subscriptionExpiresAt: expiry }),
     },
   });
+  if (plan || expiry) {
+    const until = expiry ? ` until ${expiry.toISOString().slice(0, 10)}` : "";
+    recordActivity({
+      userId: user.id,
+      type: "plan.changed",
+      message: `Plan set to ${user.subscriptionPlan}${until} by ${req.user!.email}`,
+      metadata: { plan: user.subscriptionPlan, expiresAt: expiry?.toISOString(), changedBy: req.user!.email },
+    });
+  }
   res.json({ success: true, data: serializeUser(user) });
 });
 
@@ -310,6 +322,12 @@ export const reviewBkashPayment = asyncHandler(async (req: AuthRequest, res: Res
   if (status === "completed") {
     await completePayment(payment);
   }
+  recordPaymentOutcome(
+    payment,
+    status === "completed",
+    status === "completed" ? "approved by an admin (bKash)" : "rejected by an admin (bKash)",
+    { reviewNotes: reviewNotes || undefined, reviewedBy: req.user!.email }
+  );
 
   res.json({ success: true, data: serializePayment(payment) });
 });
@@ -423,6 +441,82 @@ export const getGeminiKeyStatus = asyncHandler(async (_req: AuthRequest, res: Re
       })),
     },
   });
+});
+
+/**
+ * User activity, newest first (Admin -> Activity). Filters: `type` (an ACTIVITY_TYPES key),
+ * `userId`, and `search` (the user's name or email). Also returns how often each type
+ * happened in the last 24 hours, and, when filtered to one user, a summary of that user.
+ */
+export const getActivity = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+  const type = isActivityType(req.query.type) ? req.query.type : undefined;
+  const userId = typeof req.query.userId === "string" && req.query.userId.trim() ? req.query.userId.trim() : undefined;
+  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+
+  const where: Prisma.ActivityLogWhereInput = {
+    ...(type && { type }),
+    ...(userId && { userId }),
+    // MySQL's default collation makes `contains` case-insensitive
+    ...(search && { user: { OR: [{ name: { contains: search } }, { email: { contains: search } }] } }),
+  };
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const [activities, total, recent, user] = await Promise.all([
+    prisma.activityLog.findMany({
+      where,
+      include: { user: payerSelect },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.activityLog.count({ where }),
+    prisma.activityLog.groupBy({
+      by: ["type"],
+      where: { createdAt: { gte: since }, ...(userId && { userId }) },
+      _count: { _all: true },
+    }),
+    userId ? prisma.user.findUnique({ where: { id: userId } }) : null,
+  ]);
+
+  const labelOf = (value: string) => (isActivityType(value) ? ACTIVITY_TYPES[value] : value);
+
+  res.json({
+    success: true,
+    data: {
+      activities: activities.map((activity) => serializeActivity(activity, labelOf(activity.type))),
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      types: Object.entries(ACTIVITY_TYPES).map(([value, label]) => ({ type: value, label })),
+      last24h: Object.fromEntries(recent.map((row) => [row.type, row._count._all])),
+      user: user
+        ? {
+            _id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            isEmailVerified: user.isEmailVerified,
+            subscription: subscriptionOf(user),
+            resumes: await prisma.resume.count({ where: { userId: user.id } }),
+            createdAt: user.createdAt,
+            lastLoginAt: user.lastLoginAt,
+          }
+        : undefined,
+    },
+  });
+});
+
+/** Sends a test email (to `to`, or to the signed-in admin) with the saved SMTP settings. */
+export const sendAdminTestEmail = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const raw = typeof req.body?.to === "string" ? req.body.to.trim() : "";
+  const to = raw || req.user!.email;
+  if (!/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(to)) {
+    throw new ApiError(400, "Enter one valid email address to send the test to.");
+  }
+  const result = await sendTestEmail(to, req.user!.email);
+  res.json({ success: true, message: `Test email sent to ${to}. Check the inbox (and the spam folder).`, data: result });
 });
 
 export const testGeminiKeyConnection = asyncHandler(async (_req: AuthRequest, res: Response) => {

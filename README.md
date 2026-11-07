@@ -31,7 +31,9 @@ API for a bilingual (Bangla/English) CV builder for the Bangladesh job market: C
 - **Payments** — SSLCommerz, bKash, Nagad (integration-ready)
 - **Subscription plans** — Free (2 resumes) & Premium (unlimited)
 - **Referral & coupon system**
-- **Admin panel** — Users, revenue, coupons, templates, blogs
+- **Admin panel** — Users, revenue, coupons, templates, blogs, settings with a "send test email" check
+- **User activity log** — Admin → User activity: sign-ups, logins, CVs, AI use, purchase requests and payments per user, with filters
+- **Admin email notifications** — new users, purchase requests and new CVs, each switchable in Admin → Settings
 - **Blog & SEO** — Sitemap, OpenGraph, schema markup
 
 ## Tech Stack

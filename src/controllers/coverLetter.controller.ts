@@ -14,6 +14,7 @@ import {
 import { generateCoverLetterPDF } from "../services/pdf.service.js";
 import { cvToText } from "../services/ai/cvText.js";
 import { trackEvent } from "../services/analytics.service.js";
+import { recordActivity } from "../services/activity.service.js";
 import { normalizeLanguage } from "../utils/language.js";
 
 export const getCoverLetters = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -61,6 +62,13 @@ export const generateCoverLetter = asyncHandler(async (req: AuthRequest, res: Re
 
   await incrementAiUsage(user);
   await trackEvent("aiRequests");
+  recordActivity({
+    userId: user.id,
+    type: "cover_letter.created",
+    message: `Created a cover letter for ${letter.jobTitle} at ${letter.companyName}`,
+    metadata: { coverLetterId: letter.id, company: letter.companyName, jobTitle: letter.jobTitle, resumeId: letter.resumeId ?? undefined },
+    req,
+  });
 
   res.status(201).json({ success: true, data: { letter: serializeCoverLetter(letter), generated: result } });
 });

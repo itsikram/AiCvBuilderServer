@@ -259,14 +259,46 @@ SSLCommerz IPN callback (server-to-server).
 
 ## Admin (requires admin role)
 
+Public: `GET /page-content` returns active Page Content entries only; the admin list
+(`GET /admin/page-content`) includes inactive ones.
+
 ### GET /admin/dashboard
 ### GET /admin/users?page=1&search=
+### GET /admin/activity?page=1&limit=50&type=&userId=&search=
+User activity, newest first: sign-ups, logins, email verification, password resets, CVs
+(created, deleted, shared, downloaded), cover letters, AI tool use, purchase requests, payment
+outcomes and admin plan changes. `type` is one of the `types` the response lists (e.g.
+`cv.created`); `search` matches the user's name or email. The response also has `last24h`
+(count per type) and, with `userId`, a `user` summary. Entries are kept for
+`ACTIVITY_RETENTION_DAYS` (default 180) and deleted with the user.
+```json
+{ "activities": [{ "_id": "…", "type": "cv.created", "label": "Created a CV",
+    "message": "Created CV \"Software Engineer\"", "metadata": { "resumeId": "…", "source": "new" },
+    "ip": "…", "userAgent": "…", "createdAt": "…", "user": { "_id": "…", "name": "…", "email": "…" } }],
+  "total": 1, "page": 1, "pages": 1, "types": [{ "type": "cv.created", "label": "Created a CV" }],
+  "last24h": { "cv.created": 1 } }
+```
 ### PATCH /admin/users/:id
 ### GET /admin/payments
 ### GET /admin/coupons
 ### POST /admin/coupons
 ### GET /admin/templates
 ### POST /admin/templates
+### GET /admin/settings
+### PUT /admin/settings
+### POST /admin/settings/test-email
+```json
+{ "to": "optional@example.com" }
+```
+Sends a test email with the saved SMTP settings to `to`, or to the signed-in admin. 400 when SMTP
+isn't set up, 502 with the SMTP server's error when sending fails.
+
+### Admin notification emails
+Admins are emailed (in the background, never delaying the request) when a user signs up, submits a
+purchase request (a bKash payment to review, or a Premium checkout started) or creates a CV (new,
+duplicated, imported, uploaded or translated). Recipients: `ADMIN_NOTIFICATION_EMAILS`, else every
+admin account. Each event can be switched off in Admin -> Settings -> Admin notifications
+(`NOTIFY_NEW_USER`, `NOTIFY_PURCHASE_REQUEST`, `NOTIFY_CV_CREATED`).
 
 ---
 

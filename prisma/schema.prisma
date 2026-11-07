@@ -130,6 +130,7 @@ model User {
   blogs          Blog[]
   adminSettings  AdminSetting[]
   paymentConfigs PaymentConfig[]
+  activities     ActivityLog[]
 
   @@index([googleId])
   @@index([emailVerificationToken])
@@ -360,6 +361,30 @@ model AdminSetting {
   updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@map("admin_settings")
+}
+
+/// What a user did (signed up, created a CV, asked to buy Premium, used AI...), listed in
+/// Admin -> Activity. Written by src/services/activity.service.ts, which also deletes rows
+/// older than the retention period. Removed with the user.
+model ActivityLog {
+  id        String   @id @default(cuid()) @db.VarChar(36)
+  userId    String?  @db.VarChar(36)
+  /// Dotted event name, e.g. "user.registered", "cv.created" (ACTIVITY_TYPES)
+  type      String   @db.VarChar(40)
+  /// One readable line, e.g. "Created CV \"Software Engineer\""
+  message   String   @db.VarChar(500)
+  /// Event details (CV id, plan, amount, AI feature...)
+  metadata  Json?
+  ip        String?  @db.VarChar(64)
+  userAgent String?  @db.VarChar(255)
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
+  @@map("activity_logs")
 }
 
 /// One row per day of site-wide counters

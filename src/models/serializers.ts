@@ -1,4 +1,5 @@
 import type {
+  ActivityLog,
   AdminSetting,
   Analytics,
   Blog,
@@ -101,6 +102,18 @@ export const serializeBlog = (blog: Partial<Blog> & { id: string; author?: UserR
 };
 
 export const serializeCoverLetter = (letter: CoverLetter) => withId(letter);
+
+export const serializeActivity = (activity: ActivityLog & { user?: UserRef | null }, label: string) => ({
+  _id: activity.id,
+  type: activity.type,
+  label,
+  message: activity.message,
+  metadata: (activity.metadata ?? undefined) as Record<string, unknown> | undefined,
+  ip: activity.ip ?? undefined,
+  userAgent: activity.userAgent ?? undefined,
+  createdAt: activity.createdAt,
+  user: activity.user ? userRef(activity.user) : null,
+});
 
 export const serializePageContent = (page: PageContent) => ({
   ...withId(page),

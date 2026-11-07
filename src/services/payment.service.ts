@@ -6,6 +6,7 @@ import { asJson } from "../models/Resume.js";
 import { activatePremium } from "./subscription.service.js";
 import { incrementMetrics } from "./analytics.service.js";
 import { ApiError } from "../utils/ApiError.js";
+import { recordPaymentOutcome } from "./activity.service.js";
 
 export const calculatePrice = async (
   planSlug: string,
@@ -137,10 +138,12 @@ export const handleSSLCommerzIPN = async (body: Record<string, string>) => {
       data: { status: "completed", providerData: asJson({ val_id, amount, ...body }) },
     });
     await completePayment(payment);
+    recordPaymentOutcome(payment, true, "confirmed by SSLCommerz");
     return { message: "Payment successful" };
   }
 
   await prisma.payment.update({ where: { id: payment.id }, data: { status: "failed" } });
+  recordPaymentOutcome(payment, false, `failed at SSLCommerz (${status || "no status"})`, { gatewayStatus: status });
   return { message: "Payment failed" };
 };
 

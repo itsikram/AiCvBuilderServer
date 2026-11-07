@@ -29,6 +29,8 @@ import {
   getUserLimits,
 } from "../services/subscription.service.js";
 import { trackEvent } from "../services/analytics.service.js";
+import { recordActivity } from "../services/activity.service.js";
+import { announceCvCreated } from "../services/notification.service.js";
 import { cacheGet, cacheSet } from "../config/redis.js";
 import { extractCvText, resolveCvMimeType } from "../services/pdf-extraction.service.js";
 import { uploadBuffer } from "../services/cloudinary.service.js";
@@ -166,6 +168,7 @@ export const createResume = asyncHandler(async (req: AuthRequest, res: Response)
 
   await countCreatedResume(user.id);
   await trackEvent("resumesCreated");
+  announceCvCreated(req, user, resume, "new");
 
   res.status(201).json({ success: true, data: serializeResume(resume) });
 });
@@ -206,8 +209,18 @@ export const updateTemplate = asyncHandler(async (req: AuthRequest, res: Respons
 });
 
 export const deleteResume = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { count } = await prisma.resume.deleteMany({ where: { id: String(req.params.id), userId: req.user!.userId } });
+  const where = { id: String(req.params.id), userId: req.user!.userId };
+  // Read first only for the activity log's title; deleteMany stays the ownership check
+  const existing = await prisma.resume.findFirst({ where, select: { title: true } });
+  const { count } = await prisma.resume.deleteMany({ where });
   if (!count) throw new ApiError(404, "Resume not found");
+  recordActivity({
+    userId: req.user!.userId,
+    type: "cv.deleted",
+    message: `Deleted CV "${existing?.title ?? "Untitled"}"`,
+    metadata: { resumeId: where.id, title: existing?.title },
+    req,
+  });
   res.json({ success: true, message: "Resume deleted" });
 });
 
@@ -290,6 +303,13 @@ export const recordExport = asyncHandler(async (req: AuthRequest, res: Response)
   const resume = await findOwnResume(String(req.params.id), req.user!.userId);
   await prisma.resume.update({ where: { id: resume.id }, data: { lastExportedAt: new Date() } });
   await trackEvent("pdfExports");
+  recordActivity({
+    userId: resume.userId,
+    type: "cv.exported",
+    message: `Downloaded CV "${resume.title}" as PDF`,
+    metadata: { resumeId: resume.id, title: resume.title },
+    req,
+  });
   res.json({ success: true });
 });
 
@@ -303,6 +323,13 @@ export const togglePublic = asyncHandler(async (req: AuthRequest, res: Response)
       isPublic,
       ...(isPublic && !current.publicSlug && { publicSlug: generateUniqueSlug(current.title) }),
     },
+  });
+  recordActivity({
+    userId: current.userId,
+    type: "cv.shared",
+    message: isPublic ? `Shared CV "${current.title}" with a public link` : `Stopped sharing CV "${current.title}"`,
+    metadata: { resumeId: current.id, title: current.title, isPublic },
+    req,
   });
 
   res.json({
@@ -363,6 +390,7 @@ export const duplicateResume = asyncHandler(async (req: AuthRequest, res: Respon
       sectionOrder: asJson(original.sectionOrder),
     },
   });
+  announceCvCreated(req, user, copy, "duplicate");
 
   res.status(201).json({ success: true, data: serializeResume(copy) });
 });
@@ -441,6 +469,16 @@ const importCvText = async (
   return resume;
 };
 
+/** An import that made a new CV is announced; one into an existing CV is logged as AI use. */
+const recordImport = (req: AuthRequest, user: User, resume: { id: string; title: string; language: string; templateId: string }, intoExisting: boolean, source: "import" | "upload") => {
+  if (!intoExisting) {
+    announceCvCreated(req, user, resume, source);
+    return;
+  }
+  const feature = source === "upload" ? "Import a file into a CV" : "Import text into a CV";
+  recordActivity({ userId: user.id, type: "ai.used", message: `Used AI: ${feature} ("${resume.title}")`, metadata: { feature, resumeId: resume.id }, req });
+};
+
 export const importFromText = asyncHandler(async (req: AuthRequest, res: Response) => {
   const user = await loadUser(req.user!.userId);
   const resume = await importCvText(user, {
@@ -449,6 +487,7 @@ export const importFromText = asyncHandler(async (req: AuthRequest, res: Respons
     title: "Imported CV",
     uploadFields: { uploadedFileName: null, uploadedFileUrl: null, uploadedFilePath: null, uploadedFileMimeType: null, uploadedFileSize: null },
   });
+  recordImport(req, user, resume, Boolean(req.body.resumeId), "import");
   res.json({ success: true, data: { resumeId: resume.id, title: resume.title, content: resume.content } });
 });
 
@@ -486,6 +525,7 @@ export const uploadAndParseResume = asyncHandler(async (req: AuthRequest, res: R
       };
     },
   });
+  recordImport(req, user, resume, Boolean(resumeId), "upload");
 
   res.json({
     success: true,

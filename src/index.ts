@@ -11,6 +11,7 @@ import { initCloudinary } from "./services/cloudinary.service.js";
 import routes from "./routes/index.js";
 import { errorHandler, notFound } from "./middleware/error.middleware.js";
 import { generalLimiter } from "./middleware/rateLimit.middleware.js";
+import { scheduleActivityPruning } from "./services/activity.service.js";
 
 const app = express();
 
@@ -68,6 +69,8 @@ const start = async () => {
   });
 
   await connectWithRetry();
+  // Deletes user activity past its retention period (Admin -> Settings), now and daily
+  scheduleActivityPruning();
   initCloudinary();
   const redis = getRedis();
   if (redis) {
