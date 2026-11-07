@@ -79,6 +79,7 @@ test("career coach: the chat goes in a data block with the coach rules; no CV me
   script.push(JSON.stringify({ reply: "Start with bdjobs.", edits: [], suggestions: ["How do I write a cover letter?"] }));
   const result = await geminiService.coachChat({
     transcript: "USER: How do I find an IT job?",
+    hasCv: false,
     cvText: "",
     fields: "",
     jobDescription: "",
@@ -89,4 +90,20 @@ test("career coach: the chat goes in a data block with the coach rules; no CV me
   assert.match(systemOf(request), /career coach/);
   assert.match(promptOf(request), /<chat>\nUSER: How do I find an IT job\?\n<\/chat>/);
   assert.match(promptOf(request), /hasn't selected a CV/);
+});
+
+test("career coach with a CV: edit rules include blank fields and the CV's language", async () => {
+  script.push(JSON.stringify({ reply: "Done.", edits: [{ id: "e0", after: "Summary", reason: "asked" }], suggestions: [] }));
+  await geminiService.coachChat({
+    transcript: "USER: Write my summary",
+    hasCv: true,
+    cvText: "Rahim | Accountant",
+    fields: "e0 (empty): ",
+    jobDescription: "",
+    language: "bn",
+  });
+  const prompt = promptOf(requests.at(-1)!);
+  assert.match(prompt, /\(empty\) are blank/);
+  assert.match(prompt, /language the CV is written in/);
+  assert.doesNotMatch(prompt, /hasn't selected a CV/);
 });

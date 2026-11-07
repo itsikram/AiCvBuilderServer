@@ -5,10 +5,10 @@ import { IResumeContent, asJson, serializeResume, withContentDefaults } from "..
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
-import { geminiService } from "../services/ai/gemini.service.js";
+import { COACH_EDIT_MAX, geminiService } from "../services/ai/gemini.service.js";
 import { cvToText } from "../services/ai/cvText.js";
 import { chatTranscript } from "../services/ai/chat.js";
-import { applyCvEdits, editableFields, fieldsToPrompt, toCvEdits } from "../services/ai/cvFields.js";
+import { applyCvEdits, coachFields, fieldsToPrompt, toCvEdits } from "../services/ai/cvFields.js";
 import { withAiQuota } from "./resumeAi.controller.js";
 import type {
   applyEditsSchema,
@@ -75,26 +75,34 @@ export const interviewFeedback = asyncHandler(async (req: AuthRequest, res: Resp
 export const coachChat = asyncHandler(async (req: AuthRequest, res: Response) => {
   const body = req.body as Body<typeof coachChatSchema>;
   const content = await savedContent(req, body.resumeId);
-  const fields = content ? editableFields(content) : [];
+  const fields = content ? coachFields(content) : [];
 
-  const data = await withAiQuota(req, () =>
-    geminiService.coachChat({
+  // Validated inside the quota call, so an unusable answer is an error and isn't counted
+  const data = await withAiQuota(req, async () => {
+    const result = await geminiService.coachChat({
       transcript: chatTranscript(body.messages),
+      hasCv: Boolean(content),
       cvText: cvToText(content, 6000),
       fields: fieldsToPrompt(fields),
       jobDescription: body.jobDescription,
       language: body.language,
-    })
-  );
-  res.json({
-    success: true,
-    data: {
-      reply: data.reply.trim(),
-      edits: content ? toCvEdits(data.edits, fields, content.skills) : [],
-      suggestions: data.suggestions.map((s) => s.trim()).filter(Boolean),
-    },
+    });
+    // An edit at the length cap was cut off by the schema; applying it would lose the rest of the field
+    const edits = content
+      ? toCvEdits(result.edits, fields, content.skills).filter((edit) => edit.after.length < COACH_EDIT_MAX)
+      : [];
+    const reply = result.reply.trim() || (edits.length ? EDITS_ONLY_REPLY[body.language] : "");
+    // An empty reply would also break the chat: the client resends it and the validator rejects empty messages
+    if (!reply) throw new ApiError(502, "The AI returned an unexpected answer. Please try again.");
+    return { reply, edits, suggestions: result.suggestions.map((s) => s.trim()).filter(Boolean) };
   });
+  res.json({ success: true, data });
 });
+
+const EDITS_ONLY_REPLY = {
+  en: "Here are my suggested changes to your CV. Review them below and apply the ones you like.",
+  bn: "আপনার সিভির জন্য আমার পরামর্শ দেওয়া পরিবর্তনগুলো নিচে দেওয়া হলো। দেখে নিয়ে পছন্দেরগুলো বসিয়ে দিন।",
+} as const;
 
 /** Applies AI edits the user approved to their saved CV; edits whose field changed since are skipped. */
 export const applyEdits = asyncHandler(async (req: AuthRequest, res: Response) => {

@@ -12,6 +12,8 @@ export interface TextField {
   text: string;
   /** Proper nouns (people, employers, institutions): translated by transliteration only */
   name?: boolean;
+  /** A blank prose field the AI may fill when asked (see coachFields) */
+  empty?: boolean;
 }
 
 type Content = Partial<IResumeContent>;
@@ -94,7 +96,7 @@ export function collectTextFields(content: Content | undefined, scope: FieldScop
 
 /** "f0: text" lines for prompts; newlines inside values are flattened. */
 export const fieldsToPrompt = (fields: TextField[]) =>
-  fields.map((f) => `${f.id}${f.name ? " (name)" : ""}: ${f.text.replace(/\s*\n\s*/g, " / ")}`).join("\n");
+  fields.map((f) => `${f.id}${f.name ? " (name)" : ""}${f.empty ? " (empty)" : ""}: ${f.text.replace(/\s*\n\s*/g, " / ")}`).join("\n");
 
 const SAFE_SEGMENT = /^(?:[a-zA-Z]+|\d{1,3})$/;
 
@@ -149,23 +151,36 @@ export function toCvEdits(
   existingSkills: string[] = []
 ): CvEdit[] {
   const lookup = new Map(fields.map((f) => [f.id, f]));
-  const skills = new Set(existingSkills.map((s) => s.trim().toLowerCase()));
+  const skills = new Set(existingSkills.map((s) => s.trim().toLowerCase()).filter(Boolean));
   const edits: CvEdit[] = [];
   raw.forEach((edit, i) => {
     const after = edit.after.trim();
     if (!after) return;
     if (edit.id === "skill") {
-      if (skills.has(after.toLowerCase())) return;
+      // Same rules as applyCvEdits, so the user is never offered an edit that can't be applied
+      if (skills.has(after.toLowerCase()) || after.length > MAX_SKILL_LENGTH || skills.size >= MAX_SKILLS) return;
       skills.add(after.toLowerCase());
       edits.push({ key: `e${i}`, type: "add_skill", path: "skills", before: "", after, reason: edit.reason });
       return;
     }
     const field = lookup.get(edit.id);
-    if (field && field.text.trim() !== after) {
+    if (field && field.text.trim() !== after && after.length <= fieldLimit(field.path)) {
       edits.push({ key: `e${i}`, type: "rewrite", path: field.path, before: field.text, after, reason: edit.reason });
     }
   });
   return edits;
+}
+
+/** Prose fields the coach may write from scratch when they are blank ("write my summary"). */
+const FILLABLE = ["personalInfo.summary", "careerObjective"];
+
+/** Editable fields plus blank summary/objective slots (marked empty) the coach may fill. */
+export function coachFields(content: Content | undefined): TextField[] {
+  const fields = editableFields(content);
+  FILLABLE.forEach((path, i) => {
+    if (content && getAtPath(content, path) === "") fields.push({ id: `e${i}`, path, text: "", empty: true });
+  });
+  return fields;
 }
 
 // Same limits as resumeContentSchema (validators/resume.validator.ts), so an applied edit always saves
@@ -178,6 +193,7 @@ const FIELD_LIMITS: Array<[RegExp, number]> = [
   [/^customSections\.\d+\.content$/, 5000],
   [/^customSections\.\d+\.title$/, 120],
   [/^publications\.\d+\.title$/, 300],
+  [/^references\.\d+\.relationship$/, 120],
   [/\.description$/, 1000],
 ];
 const MAX_SKILLS = 100;
@@ -186,9 +202,10 @@ const MAX_SKILL_LENGTH = 100;
 export const fieldLimit = (path: string) => FIELD_LIMITS.find(([pattern]) => pattern.test(path))?.[1] ?? 200;
 
 /**
- * Applies approved edits to a saved CV. A rewrite only replaces an editable field
- * that still holds the text the suggestion was made for (the user may have changed
- * it since); anything else is skipped. Returns a copy; `content` is not changed.
+ * Applies approved edits to a saved CV. A rewrite only replaces an editable field (or
+ * fills a blank summary/objective) that still holds the text the suggestion was made
+ * for (the user may have changed it since); anything else is skipped. Returns a copy;
+ * `content` is not changed.
  */
 export function applyCvEdits<T extends Content>(
   content: T,
@@ -210,7 +227,7 @@ export function applyCvEdits<T extends Content>(
       }
       continue;
     }
-    const editable = new Set(editableFields(next).map((f) => f.path));
+    const editable = new Set(coachFields(next).map((f) => f.path));
     if (!after || !editable.has(edit.path) || getAtPath(next, edit.path) !== edit.before || after.length > fieldLimit(edit.path)) {
       results.push("skipped");
       continue;

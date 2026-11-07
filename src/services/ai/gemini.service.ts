@@ -194,12 +194,15 @@ const answerFeedbackSchema = S.object({
   followUp: S.string("A likely follow-up question the interviewer may ask next", 300),
 });
 
+/** Longest edit the coach may return: the largest CV field limit. Longer answers are cut, so the controller drops edits at this length. */
+export const COACH_EDIT_MAX = 5000;
+
 const coachSchema = S.object({
   reply: S.string("The coach's answer to the last user message", 5000),
   edits: S.array(
     S.object({
       id: S.string("A field id from <fields> (f0, f1, ...) to rewrite, or \"skill\" to add a skill", 10),
-      after: S.string("The full new text for that field, or the skill name to add", 2000),
+      after: S.string("The full new text for that field, or the skill name to add", COACH_EDIT_MAX),
       reason: S.string("Why this helps, in a few words", 200),
     }),
     6
@@ -488,7 +491,7 @@ class GeminiService {
    * One turn of the career-coach chat. With a CV it can also propose edits to its
    * fields (by id), which the user reviews and applies one by one.
    */
-  coachChat(input: { transcript: string; cvText: string; fields: string; jobDescription: string; language: Lang }) {
+  coachChat(input: { transcript: string; hasCv: boolean; cvText: string; fields: string; jobDescription: string; language: Lang }) {
     return generateJson({
       task: "career-coach",
       system: `${baseSystem(input.language)}\n${COACH_RULES}`,
@@ -497,11 +500,14 @@ class GeminiService {
       maxOutputTokens: 4000,
       prompt: [
         "Continue this conversation: answer the last USER message in <chat> as the candidate's career coach.",
-        input.fields
+        input.hasCv
           ? [
-              "edits: only when the user asks to change, improve or rewrite CV text, or agrees to a change you suggested, propose up to",
+              "edits: only when the user asks to write, change, improve or rewrite CV text, or agrees to a change you suggested, propose up to",
               "5 edits: a field id from <fields> with its full new text, or id \"skill\" to add a skill the CV shows evidence of.",
-              "Follow the honesty rules. Mention in the reply that the suggested changes are shown below to apply. Otherwise return no edits.",
+              "Fields marked (empty) are blank; fill them only when the user asks for them (e.g. \"write my summary\").",
+              "Write each edit in the language the CV is written in, even when your reply is in another language.",
+              "Follow the honesty rules. If you return edits, say in one short sentence that they are shown below to review and apply.",
+              "Otherwise return no edits.",
             ].join("\n")
           : "The user hasn't selected a CV, so return no edits. If CV feedback would need one, suggest choosing one in the 'Your CV' box.",
         "suggestions: 2-3 short next messages the user might send, written as the user.",

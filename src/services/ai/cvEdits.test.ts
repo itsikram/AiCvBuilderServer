@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyCvEdits, editableFields, fieldLimit, toCvEdits } from "./cvFields.js";
+import { applyCvEdits, applyTextUpdates, coachFields, editableFields, fieldLimit, fieldsToPrompt, toCvEdits } from "./cvFields.js";
+import { resumeContentSchema } from "../../validators/resume.validator.js";
 import { chatTranscript } from "./chat.js";
 
 const content = {
@@ -81,4 +82,71 @@ test("chat transcript keeps the newest turns within the size limit", () => {
 
   const long = chatTranscript([{ role: "user", content: "a".repeat(500) }, { role: "user", content: "b".repeat(80) }], 12, 100);
   assert.equal(long, `USER: ${"b".repeat(80)}`);
+});
+
+test("edits that apply-edits would refuse are never proposed", () => {
+  const fields = editableFields(content);
+  const position = fields.find((f) => f.path === "experience.0.position")!;
+  const edits = toCvEdits(
+    [
+      { id: position.id, after: "x".repeat(201), reason: "too long for a job title" },
+      { id: "skill", after: "s".repeat(101), reason: "too long for a skill" },
+    ],
+    fields,
+    content.skills
+  );
+  assert.deepEqual(edits, []);
+  const full = toCvEdits([{ id: "skill", after: "Tally", reason: "" }], fields, Array.from({ length: 100 }, (_, i) => `Skill ${i}`));
+  assert.deepEqual(full, []);
+});
+
+test("the coach can fill a blank summary or objective, and only when it is still blank", () => {
+  const blank = { ...content, personalInfo: { ...content.personalInfo, summary: "" }, careerObjective: "" };
+  const fields = coachFields(blank);
+  const slots = fields.filter((f) => f.empty).map((f) => f.path);
+  assert.deepEqual(slots, ["personalInfo.summary", "careerObjective"]);
+  assert.match(fieldsToPrompt(fields), /\ne0 \(empty\): $/m);
+
+  const [summary] = toCvEdits([{ id: "e0", after: "Accounting graduate.", reason: "asked for" }], fields);
+  assert.deepEqual([summary.path, summary.before], ["personalInfo.summary", ""]);
+  const result = applyCvEdits(blank, [summary]);
+  assert.deepEqual(result.results, ["applied"]);
+  assert.equal(result.content.personalInfo.summary, "Accounting graduate.");
+  // Filled since: the suggestion no longer applies
+  assert.deepEqual(applyCvEdits(result.content, [{ ...summary, after: "Other" }]).results, ["skipped"]);
+  // Not offered for fields that already have text
+  assert.equal(coachFields(content).some((f) => f.empty), false);
+});
+
+test("every editable field's limit matches the CV validator, so an applied edit always saves", () => {
+  const item = (keys: string[]) => Object.fromEntries(keys.map((k) => [k, "x"]));
+  const cv = {
+    personalInfo: { jobTitle: "x", summary: "x" },
+    careerObjective: "x",
+    experience: [{ position: "x", bullets: ["x"] }],
+    education: [item(["degree", "field"])],
+    trainings: [item(["title", "description"])],
+    projects: [item(["description"])],
+    certifications: [item(["name"])],
+    awards: [item(["title", "description"])],
+    publications: [item(["title", "description"])],
+    volunteerExperience: [item(["role", "description"])],
+    references: [item(["position", "relationship"])],
+    courses: [item(["name"])],
+    memberships: [item(["role"])],
+    customSections: [item(["title", "content"])],
+  };
+  const paths = editableFields(cv).map((f) => f.path);
+  assert.equal(paths.length, 23);
+  for (const path of paths) {
+    const limit = fieldLimit(path);
+    // The validator takes exactly `limit` characters for this field...
+    const at = (text: string) => applyTextUpdates(cv, [{ path, text }]);
+    assert.equal(resumeContentSchema.safeParse(at("a".repeat(limit))).success, true, `validator should accept ${limit} chars in ${path}`);
+    assert.equal(resumeContentSchema.safeParse(at("a".repeat(limit + 1))).success, false, `validator should reject ${limit + 1} chars in ${path}`);
+    // ...and apply-edits takes the same
+    const apply = (text: string) => applyCvEdits(cv, [{ type: "rewrite", path, before: "x", after: text }]).results[0];
+    assert.equal(apply("a".repeat(limit)), "applied", path);
+    assert.equal(apply("a".repeat(limit + 1)), "skipped", path);
+  }
 });
