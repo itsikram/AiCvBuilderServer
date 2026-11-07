@@ -154,6 +154,42 @@ Returns `{ bullets, tips }`. Numbers are kept, never invented; `tips` asks for m
 #### POST /resumes/ai/grammar
 `{ "content": {...}, "language": "en" }` returns `{ issues: [{ path, original, corrected, explanation }] }`.
 
+#### POST /resumes/ai/interview/questions
+```json
+{ "resumeId": "optional", "jobTitle": "Junior Officer", "jobDescription": "optional job post", "focus": "mixed | behavioral | technical | hr | viva", "count": 8, "language": "en" }
+```
+Needs `jobTitle`, `jobDescription` or a CV with a job title. `count` is 3-12. `viva` is a Bangladeshi
+government/bank/BCS viva board. Returns
+`{ jobTitle, prepTips: string[], questions: [{ id, category, question, whyAsked, tips, sampleAnswer }] }`;
+`category` is `behavioral | technical | situational | hr | role`. Model answers use only facts from the
+CV and mark missing details in `[brackets]`.
+
+#### POST /resumes/ai/interview/feedback
+```json
+{ "question": "Tell me about yourself.", "answer": "the user's practice answer (15-5000 chars)", "resumeId": "optional", "jobTitle": "optional", "jobDescription": "optional", "language": "en" }
+```
+Returns `{ score (0-10), verdict, strengths, improvements, improvedAnswer, followUp }`.
+
+#### POST /resumes/ai/coach
+One reply from the career coach chat. The server stores nothing: the client sends the conversation
+(up to 40 messages, each up to 6000 chars, the last from the user). Only the newest turns that fit
+about 12,000 characters reach the model.
+```json
+{ "messages": [{ "role": "user | assistant", "content": "..." }], "resumeId": "optional", "jobDescription": "optional", "language": "en" }
+```
+Returns `{ reply, edits, suggestions }`. `edits` has the same shape as the tailor edits and is only
+filled when a `resumeId` is sent and the user asked for CV changes. `suggestions` are 2-3
+follow-up messages the user can send with one tap.
+
+#### POST /resumes/:id/apply-edits
+Applies edits the user approved (from `/ai/coach` or `/ai/tailor`) to a saved CV. Not an AI call.
+```json
+{ "edits": [{ "type": "rewrite | add_skill", "path": "personalInfo.summary", "before": "current text", "after": "new text" }] }
+```
+A rewrite is applied only if the field still holds `before`, is a prose field or job title (never
+names, contact details or personal details) and `after` fits that field's length limit; otherwise
+it is skipped. Returns `{ resume, results: ["applied" | "skipped", ...], applied, skipped }`.
+
 #### POST /resumes/:id/translate
 `{ "targetLanguage": "bn" }` creates a translated copy (201, the new CV). The original is unchanged.
 Counts against the CV limit.

@@ -246,3 +246,50 @@ export const atsCheckSchema = z.object({
   jobDescription: z.string().max(12000).optional(),
   language: language.optional(),
 });
+
+const jobTitle = z.string().trim().max(120).optional().default("");
+const jobPost = z.string().trim().max(12000).optional().default("");
+
+export const interviewQuestionsSchema = z.object({
+  resumeId: objectId.optional(),
+  jobTitle,
+  jobDescription: jobPost,
+  focus: z.enum(["mixed", "behavioral", "technical", "hr", "viva"]).optional().default("mixed"),
+  count: z.number().int().min(3).max(12).optional().default(8),
+  language: language.optional().default("en"),
+});
+
+export const interviewFeedbackSchema = z.object({
+  resumeId: objectId.optional(),
+  jobTitle,
+  jobDescription: jobPost,
+  question: z.string().trim().min(5).max(500),
+  answer: z.string().trim().min(15, "Write your answer (at least a full sentence) first").max(5000),
+  language: language.optional().default("en"),
+});
+
+export const coachChatSchema = z.object({
+  resumeId: objectId.optional(),
+  jobDescription: jobPost,
+  messages: z
+    .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(6000) }))
+    .min(1)
+    .max(40)
+    .refine((messages) => messages[messages.length - 1]?.role === "user", "The last message must be yours"),
+  language: language.optional().default("en"),
+});
+
+/** Edits from the tailor tool or the career coach, approved by the user, applied to a saved CV. */
+export const applyEditsSchema = z.object({
+  edits: z
+    .array(
+      z.object({
+        type: z.enum(["rewrite", "add_skill"]),
+        path: z.string().max(80).regex(/^[A-Za-z0-9.]+$/, "Invalid field"),
+        before: z.string().max(5000).optional().default(""),
+        after: z.string().trim().min(1).max(5000),
+      })
+    )
+    .min(1)
+    .max(20),
+});

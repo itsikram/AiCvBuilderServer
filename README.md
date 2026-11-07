@@ -13,6 +13,8 @@ API for a bilingual (Bangla/English) CV builder for the Bangladesh job market: C
 
 - **AI writing help** — objective/summary options with tone, action-verb duty lines (numbers only if the user gave them), skill suggestions
 - **Tailor to a job** — match score, matched/missing keywords and field-level edits the user approves one by one (English or Bangla job posts)
+- **AI Career Coach (chat agent)** — career advice grounded in the user's CV and a target job; proposes CV edits the user applies with one click (stale or protected fields are skipped)
+- **AI Interview Coach** — likely questions (mixed, behavioural, technical, HR or Bangladeshi viva board) with model answers from the CV, then scored feedback on practice answers and follow-up questions
 - **Grammar check and translation** — per-field fixes; translated copy of a CV (English ↔ Bangla)
 - **Import** — PDF, Word (.docx) or pasted text/LinkedIn mapped into CV fields (SSC/HSC/Honours, GPA/CGPA, personal details)
 - **AI Resume Improver** — Keyword optimization from job descriptions + ATS score
