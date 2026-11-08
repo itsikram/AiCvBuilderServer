@@ -312,6 +312,48 @@ Public: `GET /page-content` returns active Page Content entries only; the admin 
 (`GET /admin/page-content`) includes inactive ones.
 
 ### GET /admin/dashboard
+Totals, the last 30 days of daily counters, the 10 newest users and the 10 latest completed or
+pending payments.
+
+### GET /admin/analytics?range=30d
+Business analytics for Admin -> Analytics. `range` is `7d`, `30d`, `90d` (daily buckets) or `365d`
+(monthly buckets), in Bangladesh time. Returns `totals` and `previousTotals` (the period of the same
+length before it): new users, active users, CVs created, PDF downloads, AI requests, trials started,
+paid orders, paying customers and revenue; `series` (one point per bucket with the same fields);
+`funnel` (of the users who signed up in the period: made a CV, downloaded, started a trial, paid;
+how many came back a day or more later; sign-up method, language and invites); `revenueByItem`,
+`revenueByMethod`, `aiFeatures`, `templates`, `cvLanguages`; and `planMix` (everyone's plan today).
+Active users and AI tools come from the activity log, so they only reach back as far as
+`ACTIVITY_RETENTION_DAYS`.
+
+### GET /admin/seo?range=28d&country=bgd&device=all&refresh=0
+Admin -> SEO & keywords. `range` is `7d`, `28d`, `90d` or `365d`; `country` is `bgd` (Bangladesh) or
+`all`; `device` is `all`, `mobile`, `desktop` or `tablet`. Always returns the tracked `keywords` and
+`cvKeywords` (the most common target job titles and skills in CVs edited in the period, counted once
+per user). When Google Search Console is connected (Admin -> Settings -> Google Search Console: a
+service account's JSON key, with that account added as a user of the property), `search` holds
+totals and the previous period, a daily trend, the top 250 searches, top pages, devices, countries,
+Bangla-script vs Latin searches, `opportunities` (`almostPageOne`: positions 8-20, `lowCtr`: page one
+but under half the usual click rate, `newQueries`, `dropping`) and each tracked keyword's clicks,
+impressions, CTR, position, previous position and the page Google shows (`wrongPage` when it isn't
+the target). Google's data is cached for 30 minutes; `refresh=1` fetches it again. If Google
+refuses, `searchError` says why and what to change.
+
+### POST /admin/seo/test
+Checks the saved key: `{ serviceAccount, property, hasAccess, sites }`.
+
+### POST /admin/seo/keywords
+```json
+{ "keywords": ["cv format for nurse job", "নার্স সিভি ফরমেট"], "targetPath": "/cv-format-bangladesh", "notes": "optional" }
+```
+Keywords are stored lower-case with single spaces; the language is detected from the script.
+Returns `{ added, skipped }` (skipped = already tracked).
+
+### PATCH /admin/seo/keywords/:id
+`{ keyword?, language?, targetPath?, notes? }`. 409 if the new wording is already tracked.
+
+### DELETE /admin/seo/keywords/:id
+
 ### GET /admin/users?page=1&search=
 ### GET /admin/activity?page=1&limit=50&type=&userId=&search=
 User activity, newest first: sign-ups, logins, email verification, password resets, CVs

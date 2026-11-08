@@ -621,3 +621,19 @@ model Analytics {
 
   @@map("analytics")
 }
+
+/// A search phrase tracked in Admin -> SEO & keywords; its clicks, impressions and position come
+/// from Google Search Console when that is connected (Admin -> Settings -> Google Search Console).
+model SeoKeyword {
+  id         String   @id @default(cuid()) @db.VarChar(36)
+  /// Stored lower-case, as Search Console reports queries
+  keyword    String   @unique @db.VarChar(191)
+  language   Language @default(en)
+  /// The page meant to rank for it, e.g. /cv-format-bangladesh
+  targetPath String?  @db.VarChar(191)
+  notes      String?  @db.VarChar(500)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("seo_keywords")
+}

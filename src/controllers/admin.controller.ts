@@ -129,12 +129,18 @@ const buildBlogPayload = async (req: AuthRequest) => {
 const payerSelect = { select: { id: true, name: true, email: true } } as const;
 
 export const getDashboard = asyncHandler(async (_req: AuthRequest, res: Response) => {
-  const [stats, totalUsers, totalResumes, totalRevenue, recentUsers] = await Promise.all([
+  const [stats, totalUsers, totalResumes, totalRevenue, recentUsers, recentPayments] = await Promise.all([
     getDashboardStats(),
     prisma.user.count(),
     prisma.resume.count(),
     prisma.payment.aggregate({ where: { status: "completed" }, _sum: { amount: true } }),
     prisma.user.findMany({ orderBy: { createdAt: "desc" }, take: 10 }),
+    prisma.payment.findMany({
+      where: { status: { in: ["completed", "pending"] } },
+      orderBy: { updatedAt: "desc" },
+      take: 10,
+      include: { user: { select: { name: true, email: true } } },
+    }),
   ]);
 
   res.json({
@@ -150,6 +156,14 @@ export const getDashboard = asyncHandler(async (_req: AuthRequest, res: Response
         email: user.email,
         subscription: subscriptionOf(user),
         createdAt: user.createdAt,
+      })),
+      recentPayments: recentPayments.map((payment) => ({
+        _id: payment.id,
+        userId: payment.user ? { name: payment.user.name, email: payment.user.email } : null,
+        amount: payment.amount,
+        status: payment.status,
+        paymentMethod: payment.provider,
+        createdAt: payment.updatedAt,
       })),
     },
   });
@@ -645,6 +659,16 @@ export const getPublicPageContents = asyncHandler(async (_req: AuthRequest, res:
 // Settings managed from Admin -> Settings (see SETTING_DEFINITIONS). Secrets are write-only:
 // they are never sent back to the browser, only whether one is set and its last characters.
 const secretPreview = (value: string) => {
+  // A service account key: name its account rather than showing fragments of the key
+  if (value.startsWith("{")) {
+    try {
+      const email = JSON.parse(value).client_email;
+      if (typeof email === "string") return `JSON key for ${email}`;
+    } catch {
+      /* fall through */
+    }
+    return "JSON key";
+  }
   const items = value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
   const tail = (item: string) => (item.length >= 12 ? `…${item.slice(-4)}` : "••••");
   return items.length > 1 ? `${items.length} values (${items.map(tail).join(", ")})` : tail(value);
@@ -669,6 +693,18 @@ const normalizeSettingValue = (definition: SettingDefinition, raw: unknown): str
       }
       return value.replace(/\/+$/, "");
     default:
+      if (definition.key === "SEARCH_CONSOLE_CREDENTIALS") {
+        let key: { client_email?: unknown; private_key?: unknown };
+        try {
+          key = JSON.parse(value);
+        } catch {
+          throw new ApiError(400, "Paste the whole JSON key file of the service account (it starts with { and ends with }).");
+        }
+        if (typeof key?.client_email !== "string" || typeof key?.private_key !== "string") {
+          throw new ApiError(400, "That JSON has no client_email or private_key. Download a JSON key for a service account.");
+        }
+        return JSON.stringify(key);
+      }
       return value;
   }
 };

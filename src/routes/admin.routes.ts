@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import * as adminController from "../controllers/admin.controller.js";
 import * as growthController from "../controllers/growth.controller.js";
+import * as insightsController from "../controllers/insights.controller.js";
 import { authenticate, requireAdmin } from "../middleware/auth.middleware.js";
 import { validate } from "../middleware/validate.middleware.js";
 import {
@@ -36,6 +37,14 @@ router.use(authenticate, requireAdmin);
 
 router.get("/dashboard", adminController.getDashboard);
 router.get("/activity", adminController.getActivity);
+
+// Analytics and SEO & keywords
+router.get("/analytics", insightsController.getAnalytics);
+router.get("/seo", insightsController.getSeo);
+router.post("/seo/test", insightsController.testSeoConnection);
+router.post("/seo/keywords", insightsController.createKeywords);
+router.patch("/seo/keywords/:id", byId, insightsController.updateKeyword);
+router.delete("/seo/keywords/:id", byId, insightsController.deleteKeyword);
 
 // Products, orders, access codes and job circulars
 router.get("/products", growthController.listProducts);

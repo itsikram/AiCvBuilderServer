@@ -33,6 +33,8 @@ API for a bilingual (Bangla/English) CV builder for the Bangladesh job market: C
 - **Referral & coupon system**
 - **Admin panel** — Users, revenue, coupons, templates, blogs, settings with a "send test email" check
 - **User activity log** — Admin → User activity: sign-ups, logins, CVs, AI use, purchase requests and payments per user, with filters
+- **Analytics** — Admin → Analytics: revenue, sign-ups, active users, CVs, downloads, AI use and trials against the previous period, trends, the sign-up-to-paid funnel, what sells, and CSV export
+- **SEO & keywords** — Admin → SEO & keywords: Google Search Console clicks, impressions, CTR and position by search and page, quick wins, a keyword tracker (seeded with the site's target keywords) and keyword ideas from the job titles in users' CVs
 - **Admin email notifications** — new users, purchase requests and new CVs, each switchable in Admin → Settings
 - **Premium passes** — 7-day, 30-day and 1-year passes that stack and end on their date (reminder 3 days before, then back to Free)
 - **Extras and orders** — PDF credits, AI packs, employer CV screening credits, and services an admin delivers (Admin → Products / Orders)
@@ -181,6 +183,8 @@ See [docs/API.md](docs/API.md) for full endpoint reference.
 | GET | `/payments/plans` | Subscription plans |
 | POST | `/payments/sslcommerz` | Initiate payment |
 | GET | `/admin/dashboard` | Admin stats |
+| GET | `/admin/analytics` | Business analytics (range 7d/30d/90d/365d) |
+| GET | `/admin/seo` | Search Console report, tracked keywords, CV keyword ideas |
 
 ## Deployment
 

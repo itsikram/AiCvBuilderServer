@@ -1,6 +1,7 @@
 import { prisma } from "../config/database.js";
 import { config, DEFAULT_GEMINI_MODEL } from "../config/index.js";
 import { BUILT_IN_PLAN_LIMITS } from "./planDefaults.js";
+import { defaultSearchConsoleProperty } from "./searchConsoleProperty.js";
 
 // Admin-editable settings (Admin -> Settings) are read on hot paths such as every AI
 // request, so they are cached in process memory for a minute. Updates through the
@@ -70,6 +71,12 @@ export const SETTING_GROUPS = [
   { id: "limits", title: "User limits", description: "Override the plan limits (Admin -> Plans). Leave empty to use the plan value; -1 means unlimited. Daily AI quotas reset at midnight Bangladesh time." },
   { id: "ai", title: "Gemini AI", description: "Keys from https://aistudio.google.com/apikey. Requests rotate between keys and skip rate-limited ones." },
   { id: "google", title: "Google Sign-In", description: "Web client ID from Google Cloud Console. Leave empty to hide the Google button." },
+  {
+    id: "searchConsole",
+    title: "Google Search Console",
+    description:
+      "Shows the Google searches that bring visitors in Admin -> SEO & keywords. Create a service account in Google Cloud, add its email as a user of your Search Console property, and paste its JSON key here.",
+  },
   { id: "email", title: "Email (SMTP)", description: "Used for verification, password-reset and admin notification emails." },
   { id: "notifications", title: "Admin notifications", description: "Emails to admins when someone signs up, asks to buy Premium or creates a CV. Sent with the Email (SMTP) settings above." },
   { id: "storage", title: "Cloudinary", description: "Profile photos, blog covers and uploaded CV files." },
@@ -114,6 +121,23 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: "GEMINI_BASE_URL", group: "ai", label: "Gateway base URL", type: "url", help: "Change only to route requests through a gateway", default: "https://generativelanguage.googleapis.com" },
 
   { key: "GOOGLE_CLIENT_ID", group: "google", label: "Google client ID", type: "text", placeholder: "1234567890-abc.apps.googleusercontent.com" },
+
+  {
+    key: "SEARCH_CONSOLE_PROPERTY",
+    group: "searchConsole",
+    label: "Property",
+    type: "text",
+    help: "sc-domain:yourdomain for a domain property, or the exact URL with a trailing slash for a URL-prefix property",
+    default: defaultSearchConsoleProperty(),
+  },
+  {
+    key: "SEARCH_CONSOLE_CREDENTIALS",
+    group: "searchConsole",
+    label: "Service account JSON key",
+    type: "secret",
+    help: "The whole JSON key file of the service account (read-only access is enough)",
+    placeholder: '{"type": "service_account", ...}',
+  },
 
   { key: "SMTP_HOST", group: "email", label: "SMTP host", type: "text", help: "Emails are only sent once a username is set too", default: "smtp.gmail.com" },
   { key: "SMTP_PORT", group: "email", label: "SMTP port", type: "number", help: "587 (STARTTLS) or 465 (SSL)", default: "587" },
