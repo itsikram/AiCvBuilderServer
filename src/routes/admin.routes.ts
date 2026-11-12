@@ -3,6 +3,7 @@ import multer from "multer";
 import * as adminController from "../controllers/admin.controller.js";
 import * as growthController from "../controllers/growth.controller.js";
 import * as insightsController from "../controllers/insights.controller.js";
+import * as contactMessagesController from "../controllers/contactMessages.controller.js";
 import { authenticate, requireAdmin } from "../middleware/auth.middleware.js";
 import { validate } from "../middleware/validate.middleware.js";
 import {
@@ -60,6 +61,12 @@ router.get("/jobs", growthController.adminListJobs);
 router.post("/jobs", growthController.createJob);
 router.patch("/jobs/:id", byId, growthController.updateJob);
 router.delete("/jobs/:id", byId, growthController.deleteJob);
+
+// Contact form submissions
+router.get("/contact-messages", contactMessagesController.listContactMessages);
+router.patch("/contact-messages/:id", byId, contactMessagesController.updateContactMessage);
+router.delete("/contact-messages/:id", byId, contactMessagesController.deleteContactMessage);
+
 router.get("/users", adminController.getUsers);
 router.patch("/users/:id", byId, validate(adminUpdateUserSchema), adminController.updateUser);
 router.patch("/users/:id/subscription", byId, adminController.updateUserSubscription);
