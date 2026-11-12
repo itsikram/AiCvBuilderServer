@@ -26,6 +26,7 @@ import {
 } from "../services/settings.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
+import { decodeSettingValues } from "../utils/settingEncoding.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 import { apiOriginOf } from "../utils/requestOrigin.js";
 import { getDashboardStats } from "../services/analytics.service.js";
@@ -752,6 +753,8 @@ export const getAdminSettings = asyncHandler(async (req: AuthRequest, res: Respo
         ...group,
         settings: settings.filter((setting) => setting.group === group.id),
       })),
+      // Tells the settings page it may send values base64-encoded (see decodeSettingValues)
+      valueEncodings: ["base64"],
     },
   });
 });
@@ -763,12 +766,13 @@ export const getAdminSettings = asyncHandler(async (req: AuthRequest, res: Respo
  */
 export const updateAdminSetting = asyncHandler(async (req: AuthRequest, res: Response) => {
   const body = req.body ?? {};
-  const entries: Array<[string, unknown]> =
+  const rawEntries: Array<[string, unknown]> =
     body.settings && typeof body.settings === "object"
       ? Object.entries(body.settings as Record<string, unknown>)
       : typeof body.key === "string"
         ? [[body.key, body.value]]
         : [];
+  const entries = decodeSettingValues(rawEntries, body.encoding);
 
   if (entries.length === 0) throw new ApiError(400, "Setting key is required");
 
