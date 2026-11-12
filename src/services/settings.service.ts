@@ -139,9 +139,9 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     placeholder: '{"type": "service_account", ...}',
   },
 
-  { key: "SMTP_HOST", group: "email", label: "SMTP host", type: "text", help: "Emails are only sent once a username is set too", default: "smtp.gmail.com" },
-  { key: "SMTP_PORT", group: "email", label: "SMTP port", type: "number", help: "587 (STARTTLS) or 465 (SSL)", default: "587" },
-  { key: "SMTP_USER", group: "email", label: "SMTP username", type: "text", placeholder: "noreply@aicvbuilderbd.online" },
+  { key: "SMTP_HOST", group: "email", label: "SMTP host", type: "text", help: "\"localhost\" (port 25, no username) sends through the hosting's own mail server, as GoDaddy/cPanel shared hosting requires. Any other host also needs a username", default: "smtp.gmail.com" },
+  { key: "SMTP_PORT", group: "email", label: "SMTP port", type: "number", help: "25 for localhost, otherwise 587 (STARTTLS) or 465 (SSL)", default: "587" },
+  { key: "SMTP_USER", group: "email", label: "SMTP username", type: "text", placeholder: "noreply@aicvbuilderbd.online", help: "Leave empty for localhost" },
   { key: "SMTP_PASS", group: "email", label: "SMTP password", type: "secret" },
   { key: "EMAIL_FROM", group: "email", label: "From address", type: "text", default: "AI CV Builder BD <noreply@aicvbuilderbd.online>" },
 

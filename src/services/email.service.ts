@@ -6,16 +6,32 @@ import { ApiError } from "../utils/ApiError.js";
 export const escapeHtml = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+type EmailSettings = Awaited<ReturnType<typeof integrations.email>>;
+
+/**
+ * The hosting account's own mail server (cPanel/Exim on GoDaddy shared hosting). Shared hosts
+ * block outbound SMTP to other servers, so mail goes out through localhost:25 instead.
+ */
+export const isLocalSmtp = (host: string) => /^(localhost|127\.0\.0\.1|::1)$/i.test(host.trim());
+
+/** Local SMTP needs only a host; a remote server also needs a username. */
+const isEmailConfigured = (email: EmailSettings) =>
+  Boolean(email.host) && (Boolean(email.user) || isLocalSmtp(email.host));
+
 // SMTP credentials come from Admin -> Settings (env fallback), so they are read per email
-const createTransporter = (email: Awaited<ReturnType<typeof integrations.email>>) => {
-  if (!email.host || !email.user) {
+const createTransporter = (email: EmailSettings) => {
+  if (!isEmailConfigured(email)) {
     return null;
   }
+  const local = isLocalSmtp(email.host);
   return nodemailer.createTransport({
     host: email.host,
     port: email.port,
     secure: email.port === 465,
-    auth: { user: email.user, pass: email.pass },
+    // The local relay accepts mail from the account without logging in
+    auth: email.user ? { user: email.user, pass: email.pass } : undefined,
+    // The local server's certificate names the server (e.g. *.secureserver.net), not "localhost"
+    tls: local ? { rejectUnauthorized: false } : undefined,
     // Nodemailer waits 2 minutes by default, which holds the HTTP request open that long
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
@@ -59,8 +75,8 @@ const smtpErrorMessage = (error: unknown, email: { host: string; port: number })
  */
 export const sendTestEmail = async (to: string, requestedBy: string) => {
   const email = await integrations.email();
-  if (!email.host || !email.user) {
-    throw new ApiError(400, "Email isn't set up yet. Enter the SMTP host, username and password under Email (SMTP), save, then send a test.");
+  if (!isEmailConfigured(email)) {
+    throw new ApiError(400, "Email isn't set up yet. Enter the SMTP host (\"localhost\" for the hosting's own mail server), or a host, username and password, under Email (SMTP), save, then send a test.");
   }
   try {
     await sendEmail(
