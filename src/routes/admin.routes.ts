@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import * as adminController from "../controllers/admin.controller.js";
+import * as adminResumesController from "../controllers/adminResumes.controller.js";
 import * as growthController from "../controllers/growth.controller.js";
 import * as insightsController from "../controllers/insights.controller.js";
 import * as contactMessagesController from "../controllers/contactMessages.controller.js";
@@ -71,6 +72,9 @@ router.get("/users", adminController.getUsers);
 router.patch("/users/:id", byId, validate(adminUpdateUserSchema), adminController.updateUser);
 router.patch("/users/:id/subscription", byId, adminController.updateUserSubscription);
 router.delete("/users/:id", byId, adminController.deleteUser);
+// Every user's CVs
+router.get("/resumes", adminResumesController.listResumes);
+router.get("/resumes/:id", byId, adminResumesController.getResume);
 router.get("/payments", adminController.getPayments);
 router.get("/bkash/config", adminController.getBkashConfig);
 router.put("/bkash/config", adminController.updateBkashConfig);
